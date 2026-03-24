@@ -145,7 +145,7 @@ The project validates environment configuration on boot.
 PORT=3001
 HOST=0.0.0.0
 CORS_ORIGIN=http://localhost:3000
-XAI_MODEL=llama-3.1-8b-instant
+XAI_MODEL=your_AI_model
 FIREBASE_API_KEY=your_firebase_web_api_key
 FIREBASE_PROJECT_ID=your_firebase_project_id
 FIREBASE_CLIENT_EMAIL=your_service_account_email
