@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { EvaluateAnswerDto } from './dto/evaluate-answer.dto';
 import { QuestionDto } from './dto/question.dto';
@@ -31,5 +31,11 @@ export class InterviewController {
     learningResources: object[];
   }> {
     return this.interviewService.evaluate(payload);
+  }
+
+  // testing API
+  @Get('ping')
+  ping() {
+    return 'pong';
   }
 }
