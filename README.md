@@ -132,7 +132,7 @@ http://0.0.0.0:3001
 Common local frontend origin:
 
 ```text
-http://localhost:3000
+http://localhost:3000 or http://localhost:6969
 ```
 
 ## Environment Variables
@@ -144,7 +144,7 @@ The project validates environment configuration on boot.
 ```env
 PORT=3001
 HOST=0.0.0.0
-CORS_ORIGIN=http://localhost:3000
+CORS_ORIGIN=http://localhost:3000,http://localhost:6969
 XAI_MODEL=your_AI_model
 FIREBASE_API_KEY=your_firebase_web_api_key
 FIREBASE_PROJECT_ID=your_firebase_project_id
@@ -167,7 +167,7 @@ QUESTION_WORD_LIMIT=45
 Notes:
 
 - `XAI_API_KEY` is optional, but without it live LLM generation/evaluation falls back to local-safe responses.
-- `CORS_ORIGIN` is required in production.
+- `CORS_ORIGIN` is required in production and supports a comma-separated allowlist.
 - `FIREBASE_PRIVATE_KEY` must include the full PEM value.
 - `.env.example` is currently minimal; the full runtime set is defined in [`src/config/env.config.ts`](/home/unthinkable-lap/Videos/backend/src/config/env.config.ts).
 

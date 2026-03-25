@@ -92,7 +92,8 @@ export const validateEnv = () => {
   // Normalize defaults after validation for downstream config service.
   process.env.PORT = String(port);
   process.env.HOST = host;
-  process.env.CORS_ORIGIN = corsOrigin ?? process.env.CORS_ORIGIN ?? 'http://localhost:3000';
+  process.env.CORS_ORIGIN =
+    corsOrigin ?? process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://localhost:6969';
   process.env.XAI_BASE_URL = xaiBaseUrl;
   process.env.MAX_PER_ARCHETYPE = String(maxPerArchetype);
   process.env.QUESTION_WORD_LIMIT = String(questionWordLimit);
@@ -103,7 +104,7 @@ export default () => ({
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? '0.0.0.0',
   cors: {
-    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://localhost:6969',
   },
   xai: {
     apiKey: process.env.XAI_API_KEY ?? '',

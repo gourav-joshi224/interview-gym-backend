@@ -15,7 +15,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  const corsOrigin = configService.get<string>('cors.origin', process.env.CORS_ORIGIN || '');
+  const corsOrigin = configService.get<string>('cors.origin', 'http://localhost:3000');
   const allowedOrigins = corsOrigin
     .split(',')
     .map((origin) => origin.trim())
