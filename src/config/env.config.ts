@@ -103,7 +103,7 @@ export default () => ({
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? '0.0.0.0',
   cors: {
-    origin: process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://localhost:6969',
+    origin: process.env.CORS_ORIGIN ?? '*',
   },
   xai: {
     apiKey: process.env.XAI_API_KEY ?? '',

@@ -15,16 +15,23 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  const corsOrigin = configService.get<string>('cors.origin', 'http://localhost:3000');
-  
+  const corsOrigin = configService.get<string>('cors.origin', '*');
+  const normalizeOrigin = (value: string) => value.trim().replace(/\/$/, '');
   const allowedOrigins = corsOrigin
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin))
     .filter(Boolean);
+  const allowAllOrigins = allowedOrigins.includes('*');
 
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowAllOrigins) {
+        callback(null, true);
+        return;
+      }
+
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
         return;
       }
