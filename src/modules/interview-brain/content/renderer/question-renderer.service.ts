@@ -15,6 +15,7 @@ interface RenderInput {
   familyKey?: string;
   hookId?: string;
   constraintIds?: string[];
+  sessionDifficulty?: string;
   packOverride?: TopicPack;
 }
 
@@ -26,7 +27,7 @@ export class QuestionRendererService {
     const hook = this.pickHook(pack, input.hookId);
     const constraints = this.pickConstraints(pack, input.constraintIds ?? family.defaultConstraints ?? []);
 
-    const text = this.composeQuestion(pack, family, hook, constraints);
+    const text = this.composeQuestion(pack, family, hook, constraints, input.sessionDifficulty);
 
     return {
       topicId: pack.topicId,
@@ -65,10 +66,13 @@ export class QuestionRendererService {
     family: QuestionFamily,
     hook: ScenarioHook,
     constraints: ConstraintTemplate[],
+    sessionDifficulty?: string,
   ): string {
-    const scenarioLine = family.difficulty === 'warm_up' ? '' : this.buildScenarioLine(hook);
+    const isWarmUpSession =
+      family.difficulty === 'warm_up' || this.normalizeSessionDifficulty(sessionDifficulty) === 'warm_up';
+    const scenarioLine = isWarmUpSession ? '' : this.buildScenarioLine(hook);
     const primaryAsk = this.buildPrimaryAsk(family, hook);
-    const constraintLine = family.difficulty === 'warm_up' ? '' : this.buildConstraintLine(constraints);
+    const constraintLine = isWarmUpSession ? '' : this.buildConstraintLine(constraints);
 
     const raw = [scenarioLine, primaryAsk, constraintLine].filter(Boolean).join(' ');
 
@@ -100,5 +104,16 @@ export class QuestionRendererService {
     const limited = constraints.slice(0, 2);
     const text = limited.map((c) => c.text).join('; ');
     return text ? `Constraint: ${text}.` : '';
+  }
+
+  private normalizeSessionDifficulty(difficulty?: string): QuestionFamily['difficulty'] | null {
+    if (!difficulty) return null;
+
+    const normalized = difficulty.trim().toLowerCase();
+    if (normalized === 'warm_up' || normalized === 'warm up') {
+      return 'warm_up';
+    }
+
+    return null;
   }
 }

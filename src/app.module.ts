@@ -8,6 +8,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { InterviewModule } from './modules/interview/interview.module';
 import { SessionModule } from './modules/session/session.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { UsersModule } from './modules/users/users.module';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 @Module({
@@ -22,6 +23,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     InterviewModule,
     SessionModule,
     DashboardModule,
+    UsersModule,
   ],
   providers: [
     {

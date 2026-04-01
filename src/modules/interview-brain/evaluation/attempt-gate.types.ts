@@ -16,6 +16,7 @@ export interface AttemptGateInput {
   question: string;
   answer: string;
   topic: Topic;
+  difficulty?: string;
 }
 
 export interface AttemptGateResult {

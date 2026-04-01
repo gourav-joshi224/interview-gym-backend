@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { getFirebaseAdmin } from '../../common/firebase-admin';
 
 type SkillBreakdown = {
   architecture: number;
@@ -103,6 +104,28 @@ type FirestoreDocument = {
 };
 
 type FirestoreFields = Record<string, FirestoreValue>;
+type FirestoreQueryResultItem = { document?: FirestoreDocument };
+type FirestoreListDocumentsResponse = {
+  documents?: FirestoreDocument[];
+  nextPageToken?: string;
+};
+
+const SESSION_FIELD_ALLOWLIST = new Set([
+  'topic',
+  'experience',
+  'difficulty',
+  'totalQuestions',
+  'questionDeficit',
+  'answers',
+  'status',
+  'report',
+  'questionPlan',
+  'createdAt',
+  'updatedAt',
+  'finishedAt',
+  'userId',
+  'sessionVersion',
+]);
 
 @Injectable()
 export class StorageService {
@@ -167,10 +190,15 @@ export class StorageService {
     const sessionId = randomUUID();
     const fields = this.buildSessionFieldsForCreate(input);
     const updateMask = Object.keys(fields);
+    const documentPath = `interviewSessions/${sessionId}`;
     const updateTransforms = [
       this.serverTimestampTransform('createdAt'),
       this.serverTimestampTransform('updatedAt'),
     ];
+
+    this.logger.log(
+      `Firestore createInterviewSession projectId="${config.projectId}" documentPath="${documentPath}" userId="${input.userId ?? 'null'}" status="${input.status}" answers=${input.answers.length}`,
+    );
 
     if (input.status === 'completed') {
       updateTransforms.push(this.serverTimestampTransform('finishedAt'));
@@ -185,7 +213,7 @@ export class StorageService {
         writes: [
           {
             update: {
-              name: this.documentName(`interviewSessions/${sessionId}`, config.projectId),
+              name: this.documentName(documentPath, config.projectId),
               fields,
             },
             updateMask: { fieldPaths: updateMask },
@@ -198,8 +226,15 @@ export class StorageService {
 
     if (!response.ok) {
       const details = await response.text();
+      this.logger.error(
+        `Firestore createInterviewSession failed projectId="${config.projectId}" documentPath="${documentPath}" details="${details}"`,
+      );
       throw new Error(`Failed to create interview session: ${details}`);
     }
+
+    this.logger.log(
+      `Firestore createInterviewSession succeeded projectId="${config.projectId}" documentPath="${documentPath}"`,
+    );
 
     return sessionId;
   }
@@ -212,6 +247,7 @@ export class StorageService {
     const config = this.getFirebaseConfig();
     const fields = this.buildSessionFields(input);
     const updateMask = Object.keys(fields);
+    const documentPath = `interviewSessions/${sessionId}`;
 
     if (updateMask.length === 0) {
       throw new Error('No fields provided to update interview session.');
@@ -222,6 +258,10 @@ export class StorageService {
       updateTransforms.push(this.serverTimestampTransform('finishedAt'));
     }
 
+    this.logger.log(
+      `Firestore updateInterviewSession projectId="${config.projectId}" documentPath="${documentPath}" updateMask="${updateMask.join(',')}" markFinished=${options?.markFinished === true}`,
+    );
+
     const response = await this.firestoreFetch(this.commitUrl(config.apiKey, config.projectId), {
       method: 'POST',
       headers: {
@@ -231,11 +271,10 @@ export class StorageService {
         writes: [
           {
             update: {
-              name: this.documentName(`interviewSessions/${sessionId}`, config.projectId),
+              name: this.documentName(documentPath, config.projectId),
               fields,
             },
             updateMask: { fieldPaths: updateMask },
-            currentDocument: { exists: true },
             updateTransforms,
           },
         ],
@@ -244,19 +283,95 @@ export class StorageService {
 
     if (!response.ok) {
       const details = await response.text();
+      this.logger.error(
+        `Firestore updateInterviewSession failed projectId="${config.projectId}" documentPath="${documentPath}" details="${details}"`,
+      );
       throw new Error(`Failed to update interview session: ${details}`);
     }
+
+    this.logger.log(
+      `Firestore updateInterviewSession succeeded projectId="${config.projectId}" documentPath="${documentPath}"`,
+    );
   }
 
   async getInterviewSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const config = this.getFirebaseConfig();
+    const documentPath = `interviewSessions/${sessionId}`;
+
+    this.logger.log(
+      `Firestore getInterviewSession projectId="${config.projectId}" documentPath="${documentPath}"`,
+    );
 
     const response = await this.firestoreFetch(
-      this.documentUrl(`interviewSessions/${sessionId}`, config.apiKey, config.projectId),
+      this.documentUrl(documentPath, config.apiKey, config.projectId),
       {
         method: 'GET',
       },
     );
+
+    if (response.status === 404) {
+      this.logger.warn(
+        `Firestore getInterviewSession not found projectId="${config.projectId}" documentPath="${documentPath}"`,
+      );
+      return null;
+    }
+
+    if (!response.ok) {
+      const details = await response.text();
+      this.logger.error(
+        `Firestore getInterviewSession failed projectId="${config.projectId}" documentPath="${documentPath}" details="${details}"`,
+      );
+      throw new Error(`Failed to fetch interview session: ${details}`);
+    }
+
+    this.logger.log(
+      `Firestore getInterviewSession succeeded projectId="${config.projectId}" documentPath="${documentPath}"`,
+    );
+
+    const document = (await response.json()) as FirestoreDocument;
+    return this.parseSessionDocument(document);
+  }
+
+  async upsertUser(uid: string, name: string, email: string): Promise<void> {
+    const config = this.getFirebaseConfig();
+    const fields: Record<string, FirestoreValue> = {
+      uid: this.stringField(uid),
+      name: this.stringField(name),
+      email: this.stringField(email),
+      updatedAt: this.timestampField(new Date().toISOString()),
+    };
+    const query = new URLSearchParams({ key: config.apiKey });
+
+    for (const fieldPath of Object.keys(fields)) {
+      query.append('updateMask.fieldPaths', fieldPath);
+    }
+
+    const response = await this.firestoreFetch(
+      `https://firestore.googleapis.com/v1/projects/${config.projectId}/databases/(default)/documents/users/${uid}?${query.toString()}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: this.documentName(`users/${uid}`, config.projectId),
+          fields,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Failed to upsert user: ${details}`);
+    }
+  }
+
+  async getUser(uid: string): Promise<{ uid: string; name: string; email: string } | null> {
+    const config = this.getFirebaseConfig();
+
+    const response = await this.firestoreFetch(this.documentUrl(`users/${uid}`, config.apiKey, config.projectId), {
+      method: 'GET',
+    });
 
     if (response.status === 404) {
       return null;
@@ -264,11 +379,164 @@ export class StorageService {
 
     if (!response.ok) {
       const details = await response.text();
-      throw new Error(`Failed to fetch interview session: ${details}`);
+      throw new Error(`Failed to fetch user: ${details}`);
     }
 
     const document = (await response.json()) as FirestoreDocument;
-    return this.parseSessionDocument(document);
+    return this.parseUserDocument(document);
+  }
+
+  async getSessionsByUserId(uid: string, limit: number): Promise<Array<Record<string, unknown>>> {
+    const payload = await this.querySessionDocumentsByUserId(uid, limit);
+
+    return payload
+      .map((item) => (item.document ? this.parseSessionDocument(item.document) : null))
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+      .map((session) => ({
+        sessionId: session.sessionId,
+        topic: session.topic,
+        experience: session.experience,
+        difficulty: session.difficulty,
+        totalQuestions: session.totalQuestions,
+        status: session.status,
+        overallScore:
+          session.report && typeof session.report === 'object'
+            ? (session.report as { overallScore?: unknown }).overallScore ?? null
+            : null,
+        createdAt: session.createdAt,
+      }));
+  }
+
+  async getDetailedSessionsByUserId(uid: string, limit: number): Promise<Array<Record<string, unknown>>> {
+    const payload = await this.querySessionDocumentsByUserId(uid, limit);
+
+    return payload
+      .map((item) => (item.document ? this.parseSessionDocument(item.document) : null))
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+  }
+
+  async cleanupInterviewSessionFieldsByUserId(
+    uid: string,
+    limit: number,
+  ): Promise<{
+    scanned: number;
+    cleaned: number;
+    unchanged: number;
+    sessions: Array<{ sessionId: string; removedFields: string[] }>;
+  }> {
+    const config = this.getFirebaseConfig();
+    const payload = await this.querySessionDocumentsByUserId(uid, limit);
+    const sessions: Array<{ sessionId: string; removedFields: string[] }> = [];
+
+    for (const item of payload) {
+      const document = item.document;
+      if (!document?.name || !document.fields) {
+        continue;
+      }
+
+      const removedFields = Object.keys(document.fields).filter((field) => !SESSION_FIELD_ALLOWLIST.has(field));
+      if (!removedFields.length) {
+        continue;
+      }
+
+      this.logger.log(
+        `Firestore cleanupInterviewSessionFields projectId="${config.projectId}" documentPath="${document.name.split('/documents/')[1] ?? document.name}" removedFields="${removedFields.join(',')}"`,
+      );
+
+      const response = await this.firestoreFetch(this.commitUrl(config.apiKey, config.projectId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          writes: [
+            {
+              update: {
+                name: document.name,
+              },
+              updateMask: { fieldPaths: removedFields },
+              updateTransforms: [this.serverTimestampTransform('updatedAt')],
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Failed to clean interview session fields: ${details}`);
+      }
+
+      sessions.push({
+        sessionId: document.name.split('/').pop() ?? '',
+        removedFields,
+      });
+    }
+
+    const scanned = payload.filter((item) => Boolean(item.document?.name)).length;
+    const cleaned = sessions.length;
+    const unchanged = scanned - cleaned;
+
+    return {
+      scanned,
+      cleaned,
+      unchanged,
+      sessions,
+    };
+  }
+
+  async deleteAllInterviewSessions(): Promise<{
+    scanned: number;
+    deleted: number;
+    failed: number;
+    sessionIds: string[];
+  }> {
+    const config = this.getFirebaseConfig();
+    const documents = await this.listAllInterviewSessionDocuments();
+    const sessionIds = documents
+      .map((document) => document.name?.split('/').pop() ?? '')
+      .filter(Boolean);
+
+    if (!documents.length) {
+      return {
+        scanned: 0,
+        deleted: 0,
+        failed: 0,
+        sessionIds: [],
+      };
+    }
+
+    const chunkSize = 100;
+    for (let index = 0; index < documents.length; index += chunkSize) {
+      const chunk = documents.slice(index, index + chunkSize);
+      const writes = chunk
+        .map((document) => document.name)
+        .filter((name): name is string => Boolean(name))
+        .map((name) => ({ delete: name }));
+
+      this.logger.warn(
+        `Firestore deleteAllInterviewSessions projectId="${config.projectId}" batchStart=${index} batchSize=${writes.length}`,
+      );
+
+      const response = await this.firestoreFetch(this.commitUrl(config.apiKey, config.projectId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ writes }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Failed to delete interview sessions: ${details}`);
+      }
+    }
+
+    return {
+      scanned: documents.length,
+      deleted: documents.length,
+      failed: 0,
+      sessionIds,
+    };
   }
 
   private loadFirebaseConfig() {
@@ -441,6 +709,100 @@ export class StorageService {
     return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit?key=${apiKey}`;
   }
 
+  private collectionDocumentsUrl(path: string, apiKey: string, projectId: string, pageSize: number, pageToken?: string) {
+    const query = new URLSearchParams({
+      key: apiKey,
+      pageSize: String(pageSize),
+    });
+
+    if (pageToken) {
+      query.set('pageToken', pageToken);
+    }
+
+    return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}?${query.toString()}`;
+  }
+
+  private async querySessionDocumentsByUserId(uid: string, limit: number): Promise<FirestoreQueryResultItem[]> {
+    try {
+      const admin = getFirebaseAdmin();
+      const snapshot = await admin
+        .firestore()
+        .collection('interviewSessions')
+        .where('userId', '==', uid)
+        .orderBy('createdAt', 'desc')
+        .limit(limit)
+        .get();
+
+      return snapshot.docs.map((document: { ref: { path: string }; data: () => Record<string, unknown> }) => ({
+        document: {
+          name: this.documentName(document.ref.path, this.firebaseConfig.projectId),
+          fields: this.toFirestoreFields(document.data()),
+        },
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Admin Firestore query failed for userId="${uid}". Falling back to REST query. ${message}`);
+    }
+
+    const config = this.getFirebaseConfig();
+
+    const response = await this.firestoreFetch(this.runQueryUrl(config.apiKey, config.projectId), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'interviewSessions' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'userId' },
+              op: 'EQUAL',
+              value: { stringValue: uid },
+            },
+          },
+          orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+          limit,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Failed to fetch user sessions: ${details}`);
+    }
+
+    return (await response.json()) as FirestoreQueryResultItem[];
+  }
+
+  private async listAllInterviewSessionDocuments(): Promise<FirestoreDocument[]> {
+    const config = this.getFirebaseConfig();
+    const documents: FirestoreDocument[] = [];
+    let nextPageToken: string | undefined;
+
+    do {
+      const response = await this.firestoreFetch(
+        this.collectionDocumentsUrl('interviewSessions', config.apiKey, config.projectId, 100, nextPageToken),
+        { method: 'GET' },
+      );
+
+      if (response.status === 404) {
+        return documents;
+      }
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Failed to list interview sessions: ${details}`);
+      }
+
+      const payload = (await response.json()) as FirestoreListDocumentsResponse;
+      documents.push(...(payload.documents ?? []));
+      nextPageToken = payload.nextPageToken;
+    } while (nextPageToken);
+
+    return documents;
+  }
+
   private async firestoreFetch(input: string, init: RequestInit): Promise<Response> {
     try {
       return await fetch(input, init);
@@ -462,6 +824,65 @@ export class StorageService {
 
   private serverTimestampTransform(fieldPath: string) {
     return { fieldPath, setToServerValue: 'REQUEST_TIME' as const };
+  }
+
+  private toFirestoreFields(value: Record<string, unknown>): FirestoreFields {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, fieldValue]) => [key, this.toFirestoreValue(fieldValue)]),
+    );
+  }
+
+  private toFirestoreValue(value: unknown): FirestoreValue {
+    if (value === null || value === undefined) {
+      return { nullValue: null };
+    }
+
+    if (typeof value === 'string') {
+      return { stringValue: value };
+    }
+
+    if (typeof value === 'number') {
+      return { integerValue: String(Math.trunc(value)) };
+    }
+
+    if (typeof value === 'boolean') {
+      return { booleanValue: value };
+    }
+
+    if (value instanceof Date) {
+      return { timestampValue: value.toISOString() };
+    }
+
+    if (Array.isArray(value)) {
+      return {
+        arrayValue: {
+          values: value.map((item) => this.toFirestoreValue(item)),
+        },
+      };
+    }
+
+    if (this.isFirestoreTimestamp(value)) {
+      return { timestampValue: value.toDate().toISOString() };
+    }
+
+    if (typeof value === 'object') {
+      return {
+        mapValue: {
+          fields: this.toFirestoreFields(value as Record<string, unknown>),
+        },
+      };
+    }
+
+    return { nullValue: null };
+  }
+
+  private isFirestoreTimestamp(value: unknown): value is { toDate: () => Date } {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'toDate' in value &&
+      typeof (value as { toDate?: unknown }).toDate === 'function'
+    );
   }
 
   private readString(value: FirestoreValue | undefined) {
@@ -662,6 +1083,19 @@ export class StorageService {
       skillBreakdown: this.readSkillBreakdown(fields.skillBreakdown),
       learningResources: this.readResources(fields.learningResources),
       cached: this.readBoolean(fields.cached),
+    };
+  }
+
+  private parseUserDocument(document: FirestoreDocument): { uid: string; name: string; email: string } | null {
+    const fields = document.fields;
+    if (!fields) {
+      return null;
+    }
+
+    return {
+      uid: this.readString(fields.uid),
+      name: this.readString(fields.name),
+      email: this.readString(fields.email),
     };
   }
 

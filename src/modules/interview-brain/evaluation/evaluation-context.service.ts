@@ -23,6 +23,7 @@ export class EvaluationContextService {
       question: context.question,
       answer: context.answer,
       topic: context.topic,
+      difficulty: context.difficulty,
     });
 
     // Hard-stop: non-attempts should never flow through evidence extraction or scoring.

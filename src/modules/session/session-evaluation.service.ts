@@ -20,6 +20,8 @@ import {
 import { StoredQuestionPlanItem } from '../storage/storage.service';
 import { SCORE_PROFILE_WEIGHTS } from '../interview-brain/evaluation/score-engine.service';
 import { topicPacks } from '../interview-brain/content/topic-pack.registry';
+import { toTopicId } from '../interview-brain/domain/topic-routing.util';
+import { ResourceLink } from '../interview-brain/content/topic-pack.types';
 
 const CONCEPT_TO_SKILL: Record<string, string> = {
   // Prompt aliases and normalized fallbacks
@@ -255,7 +257,7 @@ export class SessionEvaluationService {
     };
 
     const aggregation = this.sessionAggregator.aggregate(aggregationInput);
-    const report = this.toFinalReport(aggregation, questionResults);
+    const report = this.toFinalReport(aggregation, questionResults, input.topic, questionPlan);
 
     const debugTrace = debug
       ? questionResults.map((result, index) => ({
@@ -358,6 +360,8 @@ export class SessionEvaluationService {
   private toFinalReport(
     aggregation: ReturnType<SessionAggregatorService['aggregate']>,
     questionResults: SessionQuestionAggregationResult[],
+    sessionTopic: string,
+    questionPlan: StoredQuestionPlanItem[],
   ): FinishOutput['report'] {
     const strengths = this.buildStrengths(questionResults);
     const weakAreas = this.buildWeakAreas(questionResults, aggregation.repeatedMissingConcepts, aggregation.nonAttemptCount);
@@ -374,7 +378,7 @@ export class SessionEvaluationService {
       technicalFeedback,
       improvementPlan,
       skillBreakdown,
-      learningResources: this.buildLearningResources(aggregation.repeatedMissingConcepts),
+      learningResources: this.buildLearningResources(sessionTopic, questionPlan, aggregation.repeatedMissingConcepts),
     };
   }
 
@@ -486,51 +490,109 @@ export class SessionEvaluationService {
       .join(' ');
   }
 
-  private buildLearningResources(missingConcepts: string[]): Array<{ title: string; url: string }> {
-    const RESOURCE_MAP: Record<string, { title: string; url: string }[]> = {
-      event_loop: [{ title: 'Node.js Event Loop', url: 'https://nodejs.org/en/docs/guides/event-loop-timers-and-nexttick' }],
-      caching: [{ title: 'Caching Strategies', url: 'https://redis.io/learn/howtos/solutions/caching' }],
-      system_design: [{ title: 'System Design Primer', url: 'https://github.com/donnemartin/system-design-primer' }],
-      javascript: [{ title: 'MDN JavaScript Guide', url: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide' }],
-      databases: [{ title: 'Use The Index, Luke', url: 'https://use-the-index-luke.com/' }],
-      concurrency: [{ title: 'Node.js Cluster Docs', url: 'https://nodejs.org/api/cluster.html' }],
-      queues: [{ title: 'RabbitMQ Tutorials', url: 'https://www.rabbitmq.com/tutorials' }],
-      apis: [{ title: 'REST API Design Guide', url: 'https://restfulapi.net/' }],
-      default: [{ title: 'Designing Data-Intensive Applications', url: 'https://dataintensive.net/' }],
-    };
-
-    const frequency = new Map<string, number>();
-    missingConcepts.forEach((concept) => {
-      const key = concept;
-      frequency.set(key, (frequency.get(key) ?? 0) + 1);
-    });
-
-    const rankedConcepts = [...frequency.entries()].sort((a, b) => b[1] - a[1]).map(([concept]) => concept);
-    const results: { title: string; url: string }[] = [];
+  private buildLearningResources(
+    sessionTopic: string,
+    questionPlan: StoredQuestionPlanItem[],
+    missingConcepts: string[],
+  ): Array<{ title: string; url: string }> {
+    const topicId = this.resolveLearningResourceTopicId(sessionTopic, questionPlan);
+    const packResources = topicId ? this.getTopicPackLearningResources(topicId, missingConcepts) : [];
+    const fallbackResources = packResources.length < 2 && topicId ? this.getFallbackLearningResources(topicId) : [];
+    const results: Array<{ title: string; url: string }> = [];
     const seenUrls = new Set<string>();
 
-    for (const concept of rankedConcepts) {
-      const resources = RESOURCE_MAP[concept] ?? [];
-      for (const resource of resources) {
-        if (!seenUrls.has(resource.url)) {
-          results.push(resource);
-          seenUrls.add(resource.url);
-        }
+    for (const resource of [...packResources, ...fallbackResources]) {
+      if (seenUrls.has(resource.url)) {
+        continue;
       }
-      if (results.length >= 4) break;
-    }
-
-    if (results.length < 4) {
-      for (const resource of RESOURCE_MAP.default) {
-        if (!seenUrls.has(resource.url)) {
-          results.push(resource);
-          seenUrls.add(resource.url);
-          if (results.length >= 4) break;
-        }
+      seenUrls.add(resource.url);
+      results.push(resource);
+      if (results.length >= 4) {
+        break;
       }
     }
 
     return results.slice(0, 4);
+  }
+
+  private resolveLearningResourceTopicId(sessionTopic: string, questionPlan: StoredQuestionPlanItem[]): TopicId | null {
+    const topicId = toTopicId(sessionTopic);
+    if (topicId) {
+      return topicId;
+    }
+
+    for (const item of questionPlan) {
+      if (item.topicId && item.topicId in topicPacks) {
+        return item.topicId as TopicId;
+      }
+    }
+
+    return null;
+  }
+
+  private getTopicPackLearningResources(topicId: TopicId, missingConcepts: string[]): Array<{ title: string; url: string }> {
+    const pack = getTopicPack(topicId);
+    const resources = pack.learningResources.filter((resource) => this.hasResourceUrl(resource));
+
+    if (this.packResourcesHaveConceptMetadata(resources)) {
+      const rankedResources = this.rankResourcesByMissingConcepts(resources, missingConcepts);
+      return rankedResources.map((resource) => ({ title: resource.title, url: resource.url!.trim() })).slice(0, 4);
+    }
+
+    return resources.map((resource) => ({ title: resource.title, url: resource.url!.trim() })).slice(0, 4);
+  }
+
+  private hasResourceUrl(resource: ResourceLink): resource is ResourceLink & { url: string } {
+    return typeof resource.url === 'string' && resource.url.trim().length > 0;
+  }
+
+  private packResourcesHaveConceptMetadata(resources: ResourceLink[]): boolean {
+    return resources.some((resource) => {
+      const resourceWithMetadata = resource as ResourceLink & { concepts?: string[]; tags?: string[] };
+      return Array.isArray(resourceWithMetadata.concepts) || Array.isArray(resourceWithMetadata.tags);
+    });
+  }
+
+  private rankResourcesByMissingConcepts(resources: ResourceLink[], missingConcepts: string[]): ResourceLink[] {
+    const rankedConcepts = new Set(
+      missingConcepts
+        .map((concept) => concept.toLowerCase().trim())
+        .filter(Boolean),
+    );
+
+    return [...resources].sort((left, right) => {
+      const leftScore = this.scoreResourceAgainstMissingConcepts(left, rankedConcepts);
+      const rightScore = this.scoreResourceAgainstMissingConcepts(right, rankedConcepts);
+      return rightScore - leftScore;
+    });
+  }
+
+  private scoreResourceAgainstMissingConcepts(resource: ResourceLink, missingConcepts: Set<string>): number {
+    const resourceWithMetadata = resource as ResourceLink & { concepts?: string[]; tags?: string[] };
+    const concepts = Array.isArray(resourceWithMetadata.concepts) ? resourceWithMetadata.concepts : [];
+    const tags = Array.isArray(resourceWithMetadata.tags) ? resourceWithMetadata.tags : [];
+    return [...concepts, ...tags]
+      .map((value) => value.toLowerCase().trim())
+      .filter(Boolean)
+      .reduce((score, value) => score + (missingConcepts.has(value) ? 1 : 0), 0);
+  }
+
+  private getFallbackLearningResources(topicId: TopicId): Array<{ title: string; url: string }> {
+    if (topicId === 'javascript' || topicId === 'nodejs') {
+      return [
+        { title: 'MDN Web Docs', url: 'https://developer.mozilla.org/' },
+        { title: 'javascript.info', url: 'https://javascript.info/' },
+      ];
+    }
+
+    if (['system-design', 'databases', 'caching', 'queues', 'apis', 'concurrency'].includes(topicId)) {
+      return [
+        { title: "Martin Fowler's Blog", url: 'https://martinfowler.com/' },
+        { title: 'roadmap.sh', url: 'https://roadmap.sh/' },
+      ];
+    }
+
+    return [];
   }
 
   private resolveRubric(
