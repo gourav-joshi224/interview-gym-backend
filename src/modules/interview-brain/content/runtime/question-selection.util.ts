@@ -33,7 +33,7 @@ export interface PlannedQuestion {
 }
 
 const WARM_UP_PRODUCTION_INCIDENT_PATTERN =
-  /\b(out-of-memory|oom|pods|heap|incident|outage|production issue|p99|latency spike|kills|crashes)\b/i;
+  /\b(out-of-memory|oom|pods|heap|incident|outage|production issue|p99|latency spike|kills|crashes|promise chain|16ms|ui thread|frame)\b/i;
 
 export function planQuestionsFromPack(
   pack: TopicPack,
@@ -121,13 +121,13 @@ function pickCompatibleHook(
             !WARM_UP_PRODUCTION_INCIDENT_PATTERN.test(`${hook.backdrop ?? ''} ${hook.trigger ?? ''}`),
         )
       : compatible;
-  const fallbackHooks = hooks.filter(
-    (hook) =>
-      !usedHookIds.has(hook.id) &&
-      !excludeQuestionIds.has(`${family.key}::${hook.id}`) &&
-      (!excludeProductionIncidentHooks ||
-        !WARM_UP_PRODUCTION_INCIDENT_PATTERN.test(`${hook.backdrop ?? ''} ${hook.trigger ?? ''}`)),
-  );
+  const fallbackHooks = excludeProductionIncidentHooks
+    ? []
+    : hooks.filter(
+        (hook) =>
+          !usedHookIds.has(hook.id) &&
+          !excludeQuestionIds.has(`${family.key}::${hook.id}`),
+      );
 
   // Fallback prevents empty sessions when hook tags are sparse.
   const candidates = warmUpSafeCompatible.length > 0 ? warmUpSafeCompatible : fallbackHooks;

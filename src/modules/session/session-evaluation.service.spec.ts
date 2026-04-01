@@ -290,23 +290,73 @@ test('Archetype overrides profile to debugging', () => {
   assert.equal(context.lastRubric.profile, 'debugging');
 });
 
-test('Learning resources align to missing concepts', () => {
-  const { service } = buildService({ missingConcepts: ['event_loop', 'caching'] });
+test('Learning resources come from the nodejs topic pack', () => {
+  const { service } = buildService({ missingConcepts: ['node-event-loop', 'node-streams'] });
 
   const result = service.evaluate({
     sessionId: 's9',
-    topic: 'javascript',
+    topic: 'nodejs',
     difficulty: 'medium',
     experience: 'mid',
     totalQuestions: 1,
     answers: [{ questionId: 'q1', question: 'q', answer: 'event loop' }],
-    questionPlan: [buildPlanItem({ questionId: 'q1' })],
+    questionPlan: [buildPlanItem({ questionId: 'q1', topicId: 'nodejs' })],
   });
 
   const urls = result.report.learningResources.map((r) => r.url);
-  assert.ok(urls.some((url) => url?.includes('event-loop')));
-  assert.ok(urls.some((url) => url?.includes('caching')));
-  assert.ok(!urls.some((url) => url?.includes('system-design-primer')));
+  assert.deepEqual(urls, [
+    'https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick',
+    'https://nodejs.org/api/stream.html',
+  ]);
+});
+
+test('Learning resources differ by topic pack', () => {
+  const { service } = buildService({ missingConcepts: ['sd-backpressure', 'sd-cache-strategy'] });
+
+  const result = service.evaluate({
+    sessionId: 's9b',
+    topic: 'system design',
+    difficulty: 'medium',
+    experience: 'mid',
+    totalQuestions: 1,
+    answers: [{ questionId: 'q1', question: 'q', answer: 'event loop' }],
+    questionPlan: [buildPlanItem({ questionId: 'q1', topicId: 'system-design', familyKey: 'sd-api-gateway' })],
+  });
+
+  const urls = result.report.learningResources.map((r) => r.url);
+  assert.deepEqual(urls, [
+    'https://github.com/donnemartin/system-design-primer',
+    'https://martin.kleppmann.com/',
+  ]);
+  assert.ok(!urls.includes('https://nodejs.org/api/stream.html'));
+});
+
+test('Learning resources fall back when a topic pack has fewer than two usable URLs', () => {
+  const { service } = buildService({ missingConcepts: ['cache-invalidation'] });
+  const cachingPack = getTopicPack('caching');
+  const originalResources = [...cachingPack.learningResources];
+  cachingPack.learningResources = [{ title: 'Redis Patterns', url: 'https://redis.io/resources' }];
+
+  try {
+    const result = service.evaluate({
+      sessionId: 's9c',
+      topic: 'caching',
+      difficulty: 'medium',
+      experience: 'mid',
+      totalQuestions: 1,
+      answers: [{ questionId: 'q1', question: 'q', answer: 'event loop' }],
+      questionPlan: [buildPlanItem({ questionId: 'q1', topicId: 'caching' })],
+    });
+
+    const urls = result.report.learningResources.map((r) => r.url);
+    assert.deepEqual(urls, [
+      'https://redis.io/resources',
+      'https://martinfowler.com/',
+      'https://roadmap.sh/',
+    ]);
+  } finally {
+    cachingPack.learningResources = originalResources;
+  }
 });
 
 test('Per-question constraintSnapshot reaches evaluation context', () => {

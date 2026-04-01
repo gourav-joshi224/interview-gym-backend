@@ -21,7 +21,7 @@ export interface AssemblyResult {
 
 const MAX_PER_ARCHETYPE = parseInt(process.env.MAX_PER_ARCHETYPE ?? '3', 10);
 const WARM_UP_PRODUCTION_INCIDENT_PATTERN =
-  /\b(out-of-memory|oom|pods|heap|incident|outage|production issue|p99|latency spike|kills|crashes)\b/i;
+  /\b(out-of-memory|oom|pods|heap|incident|outage|production issue|p99|latency spike|kills|crashes|promise chain|16ms|ui thread|frame)\b/i;
 
 @Injectable()
 export class QuestionAssemblyService {
@@ -59,6 +59,7 @@ export class QuestionAssemblyService {
         familyKey: item.family.key,
         hookId: item.hook.id,
         constraintIds: item.constraints.map((c) => c.id),
+        sessionDifficulty: input.difficulty,
       });
 
       const validation = this.validator.validate(rendered, {
@@ -78,6 +79,7 @@ export class QuestionAssemblyService {
             familyKey: item.family.key,
             hookId: retry.id,
             constraintIds: item.constraints.map((c) => c.id),
+            sessionDifficulty: input.difficulty,
           });
           const retryValidation = this.validator.validate(reRendered, {
             askedQuestions: usedQuestions,
@@ -115,6 +117,7 @@ export class QuestionAssemblyService {
             familyKey: alternateFamily.key,
             hookId: item.hook.id,
             constraintIds: altConstraints.map((c) => c.id),
+            sessionDifficulty: input.difficulty,
           });
           const altValidation = this.validator.validate(reRendered, {
             askedQuestions: usedQuestions,
@@ -206,6 +209,7 @@ export class QuestionAssemblyService {
 
     const targetCount = state.instances.length + deficit;
     const difficultyKey = normalizeDifficulty(difficulty);
+    const isWarmUpSession = difficultyKey === 'warm_up';
     const hooks = this.shuffle(pack.scenarioHooks);
 
     if (hooks.length === 0 || pack.questionFamilies.length === 0) return;
@@ -217,6 +221,17 @@ export class QuestionAssemblyService {
       for (const family of families) {
         if (state.instances.length >= targetCount) {
           break;
+        }
+
+        const availableHooks = hooks.filter(
+          (hook) =>
+            !state.usedHookIds.includes(hook.id) &&
+            !state.excludeSet.has(`${family.key}::${hook.id}`) &&
+            hook.compatibleFamilies?.includes(family.key),
+        );
+
+        if (isWarmUpSession && family.difficulty === 'warm_up' && availableHooks.length === 0) {
+          continue;
         }
 
         const hook = this.pickCompatibleHook(hooks, family, state.usedHookIds, difficultyKey, state.excludeSet);
@@ -233,6 +248,7 @@ export class QuestionAssemblyService {
           familyKey: family.key,
           hookId: hook.id,
           constraintIds: constraints.map((c) => c.id),
+          sessionDifficulty: difficulty,
         });
 
         const validation = this.validator.validate(rendered, {

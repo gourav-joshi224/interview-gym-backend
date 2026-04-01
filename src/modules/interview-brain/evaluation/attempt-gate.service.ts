@@ -112,9 +112,13 @@ export class AttemptGateService {
     }
 
     const technicalSignal = assessTechnicalSignal(normalizedAnswer, input.topic);
+    const technicalSignalCount = Math.max(
+      technicalSignal.keywordMatchCount,
+      this.getSupplementalTechnicalSignalCount(normalizedAnswer, input.topic),
+    );
 
     // Zero keyword hits means the response lacks topic-specific technical grounding.
-    if (technicalSignal.keywordMatchCount === 0) {
+    if (technicalSignalCount === 0) {
       return {
         status: 'weak_attempt',
         shouldEvaluate: true,
@@ -124,19 +128,21 @@ export class AttemptGateService {
       };
     }
 
-    // One to two keyword hits indicates partial relevance but insufficient technical depth.
-    if (technicalSignal.keywordMatchCount <= 2) {
+    const requiredTechnicalSignals = this.getRequiredTechnicalSignals(input.difficulty);
+
+    // Fewer keyword hits than the difficulty expects indicates partial relevance but insufficient technical depth.
+    if (technicalSignalCount < requiredTechnicalSignals) {
       return {
         status: 'weak_attempt',
         shouldEvaluate: true,
         scoreCap: 50,
         reason: 'Answer has limited topic-specific technical signal',
-        signals: ['technical_signal_1_2'],
+        signals: technicalSignalCount <= 2 ? ['technical_signal_1_2'] : [`technical_signal_below_${requiredTechnicalSignals}`],
       };
     }
 
     // Three or more keyword hits without explanation remains shallow despite terminology coverage.
-    if (!technicalSignal.hasConnector) {
+    if (this.requiresExplanatoryConnector(input.difficulty) && !technicalSignal.hasConnector) {
       return {
         status: 'weak_attempt',
         shouldEvaluate: true,
@@ -162,7 +168,48 @@ export class AttemptGateService {
       shouldEvaluate: true,
       scoreCap: null,
       reason: 'Answer shows sufficient technical signal with explanation',
-      signals: ['technical_signal_3+'],
+      signals: requiredTechnicalSignals === 3 ? ['technical_signal_3+'] : [`technical_signal_${requiredTechnicalSignals}+`],
     };
+  }
+
+  private getRequiredTechnicalSignals(difficulty?: string): number {
+    const normalizedDifficulty = String(difficulty ?? '').trim().toLowerCase();
+
+    if (normalizedDifficulty === 'warm_up' || normalizedDifficulty === 'warm up' || normalizedDifficulty === 'warm-up') {
+      return 2;
+    }
+
+    if (normalizedDifficulty === 'medium') {
+      return 3;
+    }
+
+    if (normalizedDifficulty === 'hard') {
+      return 4;
+    }
+
+    return 3;
+  }
+
+  private requiresExplanatoryConnector(difficulty?: string): boolean {
+    return this.getRequiredTechnicalSignals(difficulty) >= 3;
+  }
+
+  private getSupplementalTechnicalSignalCount(normalizedAnswer: string, topic: AttemptGateInput['topic']): number {
+    const topicSignals: Partial<Record<AttemptGateInput['topic'], readonly string[]>> = {
+      javascript: [
+        'block scope',
+        'function scope',
+        'variable',
+        'variables',
+        'declaration',
+        'declared',
+        'defined',
+        'curly brace',
+        'curly braces',
+      ],
+    };
+
+    const signals = topicSignals[topic] ?? [];
+    return signals.filter((signal) => normalizedAnswer.includes(signal)).length;
   }
 }

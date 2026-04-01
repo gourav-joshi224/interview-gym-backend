@@ -1,4 +1,11 @@
-import { HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { StorageService, StoredQuestionPlanItem } from '../storage/storage.service';
 import { QuestionAssemblyService } from '../interview-brain';
 import { TOPIC_DISPLAY_MAP, toTopicId } from '../interview-brain/domain/topic-routing.util';
@@ -9,33 +16,54 @@ import { StartSessionDto } from './dto/start-session.dto';
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
+
   constructor(
     private readonly storageService: StorageService,
     private readonly sessionEvaluationService: SessionEvaluationService,
     private readonly questionAssembly: QuestionAssemblyService,
   ) {}
 
-  async start(input: StartSessionDto): Promise<{ sessionId: string; question: string; questionId: string }> {
-    const { questionPlan, deficit } = await this.buildPlan(input, input.userId);
+  async start(
+    input: StartSessionDto & { authenticatedUserId: string },
+  ): Promise<{ sessionId: string; question: string; questionId: string }> {
+    this.logger.log(
+      `start requested topic="${input.topic}" experience="${input.experience}" difficulty="${input.difficulty}" totalQuestions=${input.totalQuestions} authenticatedUserId="${input.authenticatedUserId}" bodyUserId="${input.userId ?? 'n/a'}" recentQuestionIds=${input.recentQuestionIds?.length ?? 0}`,
+    );
+
+    const { questionPlan, deficit } = await this.buildPlan(input, input.authenticatedUserId);
     const firstQuestion = questionPlan[0];
 
     if (!firstQuestion) {
       throw new HttpException({ error: 'SESSION_PLAN_MISSING' }, 500);
     }
 
-    const sessionId = await this.storageService.createInterviewSession({
-      topic: input.topic,
-      experience: input.experience,
-      difficulty: input.difficulty,
-      totalQuestions: input.totalQuestions,
-      questionDeficit: deficit,
-      answers: [],
-      questionPlan,
-      status: 'in_progress',
-      report: null,
-      // TODO: make required once ApiKeyGuard is replaced with JWT guard
-      userId: input.userId ?? null,
-    });
+    let sessionId: string;
+    try {
+      sessionId = await this.storageService.createInterviewSession({
+        topic: input.topic,
+        experience: input.experience,
+        difficulty: input.difficulty,
+        totalQuestions: input.totalQuestions,
+        questionDeficit: deficit,
+        answers: [],
+        questionPlan,
+        status: 'in_progress',
+        report: null,
+        userId: input.authenticatedUserId,
+      });
+      this.logger.log(
+        `start created sessionId="${sessionId}" authenticatedUserId="${input.authenticatedUserId}" planSize=${questionPlan.length} deficit=${deficit}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `start failed authenticatedUserId="${input.authenticatedUserId}" topic="${input.topic}" error="${error instanceof Error ? error.message : String(error)}"`,
+      );
+      throw new InternalServerErrorException({
+        error: 'SESSION_CREATE_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     return {
       sessionId,
@@ -44,11 +72,21 @@ export class SessionService {
     };
   }
 
-  async progress(input: ProgressSessionDto): Promise<{ ok: boolean; question?: string; questionId?: string }> {
+  async progress(
+    input: ProgressSessionDto & { authenticatedUserId: string },
+  ): Promise<{ ok: boolean; question?: string; questionId?: string }> {
+    this.logger.log(
+      `progress requested sessionId="${input.sessionId}" authenticatedUserId="${input.authenticatedUserId}" answers=${input.answers.length}`,
+    );
     const existing = await this.storageService.getInterviewSession(input.sessionId);
 
     if (!existing) {
       throw new NotFoundException('Interview session not found.');
+    }
+
+    const sessionUserId = typeof existing.userId === 'string' ? existing.userId : null;
+    if (sessionUserId && sessionUserId !== input.authenticatedUserId) {
+      throw new ForbiddenException('SESSION_ACCESS_DENIED');
     }
 
     const questionPlan = this.extractStoredPlan(input.sessionId, existing);
@@ -61,6 +99,10 @@ export class SessionService {
       status: 'in_progress',
     });
 
+    this.logger.log(
+      `progress updated sessionId="${input.sessionId}" storedUserId="${sessionUserId ?? 'null'}" alignedAnswers=${alignedAnswers.length}`,
+    );
+
     const nextQuestion = questionPlan[input.answers.length];
 
     return {
@@ -70,17 +112,26 @@ export class SessionService {
     };
   }
 
-  async finish(input: FinishSessionDto): Promise<Record<string, unknown>> {
+  async finish(input: FinishSessionDto & { authenticatedUserId: string }): Promise<Record<string, unknown>> {
+    this.logger.log(
+      `finish requested sessionId="${input.sessionId}" authenticatedUserId="${input.authenticatedUserId}" answers=${input.answers.length}`,
+    );
     const session = await this.storageService.getInterviewSession(input.sessionId);
 
     if (!session) {
       throw new NotFoundException('Interview session not found.');
     }
 
+    const sessionUserId = typeof session.userId === 'string' ? session.userId : null;
+    if (sessionUserId && sessionUserId !== input.authenticatedUserId) {
+      throw new ForbiddenException('SESSION_ACCESS_DENIED');
+    }
+
     const topic = String(session.topic ?? 'System Design');
     const experience = String(session.experience ?? 'mid-level');
     const difficulty = String(session.difficulty ?? 'medium');
     const totalQuestions = Number(session.totalQuestions ?? 5);
+    const userId = sessionUserId;
     const questionPlan = this.extractStoredPlan(input.sessionId, session);
     const alignedAnswers = this.bindAnswersToPlan(input.sessionId, questionPlan, input.answers, {
       validateQuestionText: true,
@@ -96,19 +147,33 @@ export class SessionService {
       questionPlan,
     });
 
-    await this.storageService.updateInterviewSession(input.sessionId, {
-      topic,
-      experience,
-      difficulty,
-      totalQuestions,
-      answers: alignedAnswers,
-      questionPlan,
-      status: 'completed',
-      report: evaluation.report,
-    }, { markFinished: true });
+    try {
+      await this.storageService.updateInterviewSession(input.sessionId, {
+        topic,
+        experience,
+        difficulty,
+        totalQuestions,
+        answers: alignedAnswers,
+        questionPlan,
+        status: 'completed',
+        report: evaluation.report,
+      }, { markFinished: true });
+      this.logger.log(
+        `finish updated sessionId="${input.sessionId}" storedUserId="${sessionUserId ?? 'null'}" status="completed" overallScore=${evaluation.report.overallScore}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `finish failed sessionId="${input.sessionId}" authenticatedUserId="${input.authenticatedUserId}" error="${error instanceof Error ? error.message : String(error)}"`,
+      );
+      throw new InternalServerErrorException({
+        error: 'SESSION_UPDATE_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     return {
       sessionId: input.sessionId,
+      userId,
       topic,
       experience,
       difficulty,

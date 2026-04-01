@@ -49,11 +49,12 @@ class HeuristicEvidenceExtractionAdapter implements EvidenceExtractionAdapter {
     const normalizedQuestion = normalizeText(input.question);
     const normalizedAnswer = normalizeText(input.answer);
     const answerTokens = tokenizeNormalizedText(normalizedAnswer);
+    const mustHaveMatchThreshold = this.getMustHaveMatchThreshold(input.difficulty);
 
     return {
       normalizedQuestion,
       normalizedAnswer,
-      mustHaveMatches: input.rubric.mustHave.map((item) => this.matchRubricItem(item, normalizedAnswer)),
+      mustHaveMatches: input.rubric.mustHave.map((item) => this.matchRubricItem(item, normalizedAnswer, mustHaveMatchThreshold)),
       niceToHaveMatches: input.rubric.niceToHave.map((item) => this.matchRubricItem(item, normalizedAnswer)),
       strategyMatches: input.rubric.validStrategies.map((item) => this.matchRubricItem(item, normalizedAnswer)),
       redFlagMatches: input.rubric.redFlags.map((item) => this.matchRedFlag(item, normalizedAnswer)),
@@ -63,13 +64,13 @@ class HeuristicEvidenceExtractionAdapter implements EvidenceExtractionAdapter {
     };
   }
 
-  private matchRubricItem(item: string, normalizedAnswer: string): EvidenceMatch {
+  private matchRubricItem(item: string, normalizedAnswer: string, minimumConfidence = 0.5): EvidenceMatch {
     const normalizedItem = normalizeText(item);
     const itemTokens = this.getMeaningfulTokens(normalizedItem);
     const matchedTokens = itemTokens.filter((token) => normalizedAnswer.includes(token));
     const directPhraseMatch = normalizedAnswer.includes(normalizedItem);
     const overlapRatio = itemTokens.length === 0 ? 0 : matchedTokens.length / itemTokens.length;
-    const matched = directPhraseMatch || (itemTokens.length >= 2 ? overlapRatio >= 0.5 : overlapRatio === 1);
+    const matched = directPhraseMatch || (itemTokens.length >= 2 ? overlapRatio >= minimumConfidence : overlapRatio === 1);
 
     return {
       rubricItem: item,
@@ -105,6 +106,17 @@ class HeuristicEvidenceExtractionAdapter implements EvidenceExtractionAdapter {
 
   private getMeaningfulTokens(value: string): string[] {
     return [...new Set(tokenizeNormalizedText(value).filter((token) => token.length > 2 && !STOP_WORDS.has(token)))];
+  }
+
+  private getMustHaveMatchThreshold(difficulty: string): number {
+    const normalizedDifficulty = (difficulty ?? '').trim().toLowerCase();
+    const baseThreshold = 0.5;
+
+    if (normalizedDifficulty === 'warm_up' || normalizedDifficulty === 'warm up' || normalizedDifficulty === 'warm-up') {
+      return Math.max(0, Number((baseThreshold - 0.15).toFixed(2)));
+    }
+
+    return baseThreshold;
   }
 }
 
