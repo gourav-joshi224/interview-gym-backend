@@ -12,6 +12,10 @@ async function bootstrap() {
     validateEnv();
   }
   const app = await NestFactory.create(AppModule);
+  if (process.env.TRUST_PROXY) {
+    // Needed behind a load balancer so rate limiting sees the real client IP.
+    app.getHttpAdapter().getInstance().set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
+  }
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
@@ -53,13 +57,14 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Interview Brain API')
-    .setVersion('1.0')
-    .addApiKey({ type: 'apiKey', in: 'header', name: 'x-api-key' }, 'api-key')
-    .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api-docs', app, swaggerDocument);
+  if (process.env.NODE_ENV !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Interview Gym API')
+      .setVersion('2.0')
+      .addBearerAuth()
+      .build();
+    SwaggerModule.setup('api-docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  }
 
   const port = configService.get<number>('port', 3001);
   const host = configService.get<string>('host', '127.0.0.1');

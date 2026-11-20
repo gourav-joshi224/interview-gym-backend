@@ -1,53 +1,24 @@
-import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsNotEmpty, IsString, Min, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
-class SessionAnswerDto {
-  @ApiProperty({ example: 'javascript.event_loop::js-memory-leak' })
-  @IsString()
-  @IsNotEmpty()
-  questionId!: string;
-
-  @ApiProperty({ example: 'Walk through event loop phases for this scenario.' })
-  @IsString()
-  @IsNotEmpty()
-  question!: string;
-
-  @ApiProperty({ example: 'I would prioritize microtasks...' })
-  @IsString()
-  @IsNotEmpty()
-  answer!: string;
-}
+export const MAX_ANSWER_CHARS = 8000;
 
 export class ProgressSessionDto {
-  @ApiProperty({ example: 'd0a7d35f-7f1b-4f4b-9d89-9328b6ec9d42' })
+  @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   sessionId!: string;
 
-  @ApiProperty({ example: 'System Design' })
+  @ApiProperty({ example: 'javascript.event-loop::a1b2c3d4' })
   @IsString()
   @IsNotEmpty()
-  topic!: string;
+  @MaxLength(200)
+  questionId!: string;
 
-  @ApiProperty({ example: 'Mid' })
+  @ApiProperty({ description: 'The candidate answer to the current question' })
   @IsString()
   @IsNotEmpty()
-  experience!: string;
-
-  @ApiProperty({ example: 'Medium' })
-  @IsString()
-  @IsNotEmpty()
-  difficulty!: string;
-
-  @ApiProperty({ example: 5, minimum: 1 })
-  @IsInt()
-  @Min(1)
-  totalQuestions!: number;
-
-  @ApiProperty({ type: [SessionAnswerDto] })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => SessionAnswerDto)
-  answers!: SessionAnswerDto[];
+  @MaxLength(MAX_ANSWER_CHARS)
+  answer!: string;
 }

@@ -1,35 +1,25 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 import envConfig from './config/env.config';
-import { AiModule } from './modules/ai/ai.module';
-import { CacheModule } from './modules/cache/cache.module';
+import { CurriculumModule } from './modules/curriculum/curriculum.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
-import { InterviewModule } from './modules/interview/interview.module';
+import { HealthController } from './modules/health/health.controller';
 import { SessionModule } from './modules/session/session.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { UsersModule } from './modules/users/users.module';
-import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      load: [envConfig],
-    }),
+    ConfigModule.forRoot({ isGlobal: true, load: [envConfig] }),
     StorageModule,
-    CacheModule,
-    AiModule,
-    InterviewModule,
+    CurriculumModule,
     SessionModule,
     DashboardModule,
     UsersModule,
   ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: RateLimitGuard,
-    },
-  ],
+  controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: RateLimitGuard }],
 })
 export class AppModule {}

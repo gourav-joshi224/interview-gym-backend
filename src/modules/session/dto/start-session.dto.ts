@@ -1,37 +1,36 @@
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TOPIC_DISPLAY_MAP } from '../../interview-brain/domain/topic-routing.util';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { LEVELS, Level } from '../../../domain/levels';
 
 export class StartSessionDto {
-  @ApiProperty({ example: 'System Design', enum: Object.keys(TOPIC_DISPLAY_MAP) })
+  @ApiProperty({ example: 'system-design', description: 'Topic id from GET /curriculum' })
   @IsString()
+  @MaxLength(60)
   topic!: string;
 
-  @ApiProperty({ example: 'Mid', enum: ['Junior', 'Mid', 'Senior'] })
-  @IsString()
-  @IsIn(['Junior', 'Mid', 'Senior'])
-  experience!: string;
+  @ApiProperty({ enum: LEVELS, example: 'intermediate' })
+  @IsIn(LEVELS as unknown as string[])
+  level!: Level;
 
-  @ApiProperty({ example: 'Medium', enum: ['Warm Up', 'Medium', 'Hard', 'Epic'] })
-  @IsString()
-  @IsIn(['Warm Up', 'Medium', 'Hard', 'Epic'])
-  difficulty!: string;
+  @ApiPropertyOptional({ type: [String], description: 'Subtopic ids to restrict the session to' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  subtopics?: string[];
+
+  @ApiPropertyOptional({ type: [String], description: 'Weak concepts to target (used by "retry weak areas")' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  focus?: string[];
 
   @ApiProperty({ example: 5, minimum: 1, maximum: 10 })
   @IsInt()
   @Min(1)
   @Max(10)
   totalQuestions!: number;
-
-  // TODO: make required once ApiKeyGuard is replaced with JWT guard
-  @ApiPropertyOptional({ example: 'user_123' })
-  @IsOptional()
-  @IsString()
-  userId?: string;
-
-  @ApiPropertyOptional({ type: [String], example: ['q_101', 'q_102'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  recentQuestionIds?: string[];
 }

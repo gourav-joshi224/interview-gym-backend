@@ -1,33 +1,27 @@
-const admin = require('firebase-admin');
+import { App, cert, getApps, initializeApp } from 'firebase-admin/app';
+import { Auth, getAuth } from 'firebase-admin/auth';
+import { Firestore, getFirestore } from 'firebase-admin/firestore';
 
-type FirebaseAdminModule = typeof admin;
-
-const getRequiredEnv = (name: string) => {
+const requiredEnv = (name: string): string => {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(
-      `FIREBASE_ADMIN_INIT_FAILED: Missing ${name}. Ensure Firebase env vars are loaded before using FirebaseAuthGuard.`,
-    );
+    throw new Error(`FIREBASE_ADMIN_INIT_FAILED: Missing ${name}.`);
   }
   return value;
 };
 
-export const getFirebaseAdmin = (): FirebaseAdminModule => {
-  if (admin.apps.length) {
-    return admin;
-  }
-
-  const projectId = getRequiredEnv('FIREBASE_PROJECT_ID');
-  const clientEmail = getRequiredEnv('FIREBASE_CLIENT_EMAIL');
-  const privateKey = getRequiredEnv('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n');
-
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId,
-      clientEmail,
-      privateKey,
+/** Lazily initialises the Admin SDK once. Credentials never leave the server. */
+function getAdminApp(): App {
+  const existing = getApps()[0];
+  if (existing) return existing;
+  return initializeApp({
+    credential: cert({
+      projectId: requiredEnv('FIREBASE_PROJECT_ID'),
+      clientEmail: requiredEnv('FIREBASE_CLIENT_EMAIL'),
+      privateKey: requiredEnv('FIREBASE_PRIVATE_KEY').replace(/\\n/g, '\n'),
     }),
   });
+}
 
-  return admin;
-};
+export const getAdminAuth = (): Auth => getAuth(getAdminApp());
+export const getAdminFirestore = (): Firestore => getFirestore(getAdminApp());
