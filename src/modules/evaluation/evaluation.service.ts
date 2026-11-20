@@ -169,6 +169,7 @@ export class EvaluationService {
     for (let pass = 1; pass <= 2 && remaining.length > 0; pass += 1) {
       const response = await this.gemini.generateJson<RawGrading>({
         model: this.config.get<string>('gemini.model', 'gemini-3.8-flash'),
+        fallbackModels: this.config.get<string[]>('gemini.fallbackModels', []),
         system: this.systemPrompt(),
         prompt: this.userPrompt(level, remaining),
         schema: GRADING_SCHEMA,

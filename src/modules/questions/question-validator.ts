@@ -50,6 +50,18 @@ const SCALE_PATTERN =
 const INCIDENT_PATTERN = /\b(outage|incident|on-?call|postmortem|p99|p95|sev-?\d|multi-region|petabytes?)\b/i;
 const DEFINITION_OPENER = /^\s*(what\s+(is|are)|define)\b/i;
 
+/**
+ * Models sometimes put a whole snippet on one line. Put fences on their own lines and, when the body has no
+ * line breaks at all, break it after statement-ending semicolons so it reads as code.
+ */
+export function normalizeCodeFences(text: string): string {
+  return text.replace(/```([a-zA-Z0-9+#-]*)[ \t]*\n?([\s\S]*?)```/g, (_match, lang: string, body: string) => {
+    let code = body.replace(/^\s+|\s+$/g, '');
+    if (!code.includes('\n')) code = code.replace(/;[ \t]+(?=\S)/g, ';\n');
+    return `\n\`\`\`${lang}\n${code}\n\`\`\`\n`;
+  });
+}
+
 export function stripCode(text: string): string {
   return text.replace(/```[\s\S]*?```/g, ' ');
 }
@@ -104,7 +116,7 @@ export function validateCandidate(
 ): { ok: true; question: CleanQuestion } | { ok: false; reasons: string[] } {
   const reasons: string[] = [];
 
-  const question = asString(raw.question);
+  const question = normalizeCodeFences(asString(raw.question)).trim();
   const subtopicId = asString(raw.subtopicId);
   const type = asString(raw.type) as QuestionType;
   const level = asString(raw.level);

@@ -79,3 +79,23 @@ test('clamps point weights into 1..3 and defaults a missing weight', () => {
   assert.ok(result.ok);
   if (result.ok) assert.deepEqual(result.question.expectedPoints.map((point) => point.weight), [3, 2]);
 });
+
+test('repairs a code snippet the model put on a single line', () => {
+  const oneLine = rawQuestion({
+    type: 'coding',
+    question: 'What is the output order and why? ```js console.log("A"); setTimeout(() => console.log("B"), 0); console.log("D"); ```',
+  });
+  const result = validateCandidate(oneLine, slot, ctx());
+  assert.ok(result.ok);
+  if (result.ok) {
+    assert.match(result.question.question, /```js\nconsole\.log\("A"\);\nsetTimeout/);
+    assert.match(result.question.question, /\n```$/);
+  }
+});
+
+test('leaves a correctly formatted snippet alone', () => {
+  const fine = rawQuestion({ type: 'coding', question: 'What does this print and why?\n```js\nconst a = 1;\nconsole.log(a);\n```' });
+  const result = validateCandidate(fine, slot, ctx());
+  assert.ok(result.ok);
+  if (result.ok) assert.equal(result.question.question.match(/```/g)?.length, 2);
+});

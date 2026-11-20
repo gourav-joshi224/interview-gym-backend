@@ -6,9 +6,16 @@ export type QuestionType =
   | 'tradeoff'
   | 'coding';
 
+import { LEVELS, Level } from '../../domain/levels';
+
 export interface Subtopic {
   id: string;
   label: string;
+  /**
+   * Lowest level at which this subtopic is picked automatically. Omitted means beginner.
+   * A user can still choose it explicitly at a lower level; questions then stay at the basic idea.
+   */
+  minLevel?: Level;
 }
 
 export interface TopicDef {
@@ -34,10 +41,10 @@ export const TOPICS: TopicDef[] = [
       { id: 'linked-lists', label: 'Linked lists' },
       { id: 'stacks-queues', label: 'Stacks & queues' },
       { id: 'trees-bst', label: 'Trees & binary search trees' },
-      { id: 'heaps', label: 'Heaps & priority queues' },
+      { id: 'heaps', label: 'Heaps & priority queues', minLevel: 'intermediate' },
       { id: 'graphs', label: 'Graphs: BFS, DFS, shortest paths' },
       { id: 'recursion-backtracking', label: 'Recursion & backtracking' },
-      { id: 'dynamic-programming', label: 'Dynamic programming' },
+      { id: 'dynamic-programming', label: 'Dynamic programming', minLevel: 'intermediate' },
       { id: 'sorting-searching', label: 'Sorting & binary search' },
       { id: 'greedy', label: 'Greedy algorithms' },
     ],
@@ -49,12 +56,12 @@ export const TOPICS: TopicDef[] = [
     supportsCode: true,
     subtopics: [
       { id: 'scope-closures', label: 'Scope & closures' },
-      { id: 'this-prototypes', label: '`this` binding & prototypes' },
+      { id: 'this-prototypes', label: '`this` binding & prototypes', minLevel: 'intermediate' },
       { id: 'types-coercion', label: 'Types, coercion & equality' },
       { id: 'async-promises', label: 'Promises & async/await' },
-      { id: 'event-loop', label: 'Event loop & microtasks' },
+      { id: 'event-loop', label: 'Event loop & microtasks', minLevel: 'intermediate' },
       { id: 'modern-syntax-modules', label: 'Modern syntax & modules' },
-      { id: 'memory-gc', label: 'Memory & garbage collection' },
+      { id: 'memory-gc', label: 'Memory & garbage collection', minLevel: 'intermediate' },
       { id: 'error-handling', label: 'Error handling' },
       { id: 'functions-patterns', label: 'Functions & higher-order patterns' },
       { id: 'arrays-objects', label: 'Arrays, objects & immutability' },
@@ -66,13 +73,13 @@ export const TOPICS: TopicDef[] = [
     description: 'Runtime internals, streams, servers and backend performance.',
     supportsCode: true,
     subtopics: [
-      { id: 'runtime-event-loop', label: 'Runtime & event loop' },
+      { id: 'runtime-event-loop', label: 'Runtime & event loop', minLevel: 'intermediate' },
       { id: 'modules-npm', label: 'Modules (CJS/ESM) & npm' },
-      { id: 'streams-buffers', label: 'Streams & buffers' },
+      { id: 'streams-buffers', label: 'Streams & buffers', minLevel: 'intermediate' },
       { id: 'http-middleware', label: 'HTTP servers & middleware' },
       { id: 'async-errors', label: 'Async patterns & error handling' },
-      { id: 'scaling-processes', label: 'Cluster, worker threads & scaling' },
-      { id: 'performance-debugging', label: 'Performance & memory debugging' },
+      { id: 'scaling-processes', label: 'Cluster, worker threads & scaling', minLevel: 'intermediate' },
+      { id: 'performance-debugging', label: 'Performance & memory debugging', minLevel: 'intermediate' },
       { id: 'security-config', label: 'Security & configuration' },
       { id: 'testing-deploy', label: 'Testing & deployment' },
     ],
@@ -86,13 +93,13 @@ export const TOPICS: TopicDef[] = [
       { id: 'requirements-estimation', label: 'Requirements & capacity estimation' },
       { id: 'scaling-basics', label: 'Load balancing & horizontal scaling' },
       { id: 'storage-choices', label: 'Choosing storage (SQL vs NoSQL)' },
-      { id: 'partitioning-replication', label: 'Sharding & replication' },
+      { id: 'partitioning-replication', label: 'Sharding & replication', minLevel: 'intermediate' },
       { id: 'caching-cdn', label: 'Caching & CDNs' },
       { id: 'async-messaging', label: 'Async processing & messaging' },
-      { id: 'consistency-availability', label: 'Consistency, availability & CAP' },
-      { id: 'reliability-resilience', label: 'Reliability, retries & failure handling' },
+      { id: 'consistency-availability', label: 'Consistency, availability & CAP', minLevel: 'intermediate' },
+      { id: 'reliability-resilience', label: 'Reliability, retries & failure handling', minLevel: 'intermediate' },
       { id: 'observability', label: 'Monitoring & observability' },
-      { id: 'classic-designs', label: 'Classic designs (URL shortener, feed, chat)' },
+      { id: 'classic-designs', label: 'Classic designs (URL shortener, feed, chat)', minLevel: 'intermediate' },
     ],
   },
   {
@@ -103,11 +110,11 @@ export const TOPICS: TopicDef[] = [
     subtopics: [
       { id: 'sql-fundamentals', label: 'SQL & relational modeling' },
       { id: 'indexing', label: 'Indexes & query performance' },
-      { id: 'transactions-isolation', label: 'Transactions & isolation levels' },
+      { id: 'transactions-isolation', label: 'Transactions & isolation levels', minLevel: 'intermediate' },
       { id: 'schema-normalization', label: 'Schema design & normalization' },
       { id: 'nosql-models', label: 'NoSQL data models' },
-      { id: 'replication-sharding', label: 'Replication & sharding' },
-      { id: 'operations', label: 'Connection pooling, migrations & backups' },
+      { id: 'replication-sharding', label: 'Replication & sharding', minLevel: 'intermediate' },
+      { id: 'operations', label: 'Connection pooling, migrations & backups', minLevel: 'intermediate' },
     ],
   },
   {
@@ -118,9 +125,9 @@ export const TOPICS: TopicDef[] = [
     subtopics: [
       { id: 'cache-patterns', label: 'Caching patterns (cache-aside, write-through)' },
       { id: 'eviction-ttl', label: 'Eviction policies & TTL' },
-      { id: 'invalidation-consistency', label: 'Invalidation & consistency' },
-      { id: 'stampede-hot-keys', label: 'Cache stampede & hot keys' },
-      { id: 'distributed-caching', label: 'Redis & distributed caches' },
+      { id: 'invalidation-consistency', label: 'Invalidation & consistency', minLevel: 'intermediate' },
+      { id: 'stampede-hot-keys', label: 'Cache stampede & hot keys', minLevel: 'intermediate' },
+      { id: 'distributed-caching', label: 'Redis & distributed caches', minLevel: 'intermediate' },
       { id: 'http-cdn-caching', label: 'HTTP caching & CDN' },
     ],
   },
@@ -133,10 +140,10 @@ export const TOPICS: TopicDef[] = [
       { id: 'queue-basics', label: 'Queue fundamentals & use cases' },
       { id: 'delivery-semantics', label: 'Delivery guarantees & idempotency' },
       { id: 'retries-dlq', label: 'Retries & dead-letter queues' },
-      { id: 'ordering-partitioning', label: 'Ordering & partitioning' },
-      { id: 'backpressure-scaling', label: 'Backpressure & consumer scaling' },
-      { id: 'logs-vs-queues', label: 'Event logs (Kafka-style) vs queues' },
-      { id: 'outbox-sagas', label: 'Outbox pattern & sagas' },
+      { id: 'ordering-partitioning', label: 'Ordering & partitioning', minLevel: 'intermediate' },
+      { id: 'backpressure-scaling', label: 'Backpressure & consumer scaling', minLevel: 'intermediate' },
+      { id: 'logs-vs-queues', label: 'Event logs (Kafka-style) vs queues', minLevel: 'intermediate' },
+      { id: 'outbox-sagas', label: 'Outbox pattern & sagas', minLevel: 'intermediate' },
     ],
   },
   {
@@ -148,12 +155,12 @@ export const TOPICS: TopicDef[] = [
       { id: 'rest-http-basics', label: 'REST & HTTP fundamentals' },
       { id: 'status-errors', label: 'Status codes & error handling' },
       { id: 'authn-authz', label: 'Authentication & authorization' },
-      { id: 'idempotency-retries', label: 'Idempotency & safe retries' },
+      { id: 'idempotency-retries', label: 'Idempotency & safe retries', minLevel: 'intermediate' },
       { id: 'pagination-filtering', label: 'Pagination & filtering' },
       { id: 'versioning', label: 'Versioning & backward compatibility' },
       { id: 'rate-limiting', label: 'Rate limiting & throttling' },
-      { id: 'api-security', label: 'API security' },
-      { id: 'graphql-grpc', label: 'GraphQL & gRPC basics' },
+      { id: 'api-security', label: 'API security', minLevel: 'intermediate' },
+      { id: 'graphql-grpc', label: 'GraphQL & gRPC basics', minLevel: 'intermediate' },
     ],
   },
   {
@@ -167,8 +174,8 @@ export const TOPICS: TopicDef[] = [
       { id: 'locks-sync', label: 'Locks & synchronization primitives' },
       { id: 'deadlocks', label: 'Deadlocks & liveness' },
       { id: 'async-vs-parallel', label: 'Concurrency vs parallelism & async I/O' },
-      { id: 'atomicity-locking', label: 'Atomic operations, optimistic locking & distributed locks' },
-      { id: 'concurrency-patterns', label: 'Patterns (worker pool, producer-consumer)' },
+      { id: 'atomicity-locking', label: 'Atomic operations, optimistic locking & distributed locks', minLevel: 'intermediate' },
+      { id: 'concurrency-patterns', label: 'Patterns (worker pool, producer-consumer)', minLevel: 'intermediate' },
     ],
   },
 ];

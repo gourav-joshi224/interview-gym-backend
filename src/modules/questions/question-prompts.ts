@@ -109,7 +109,8 @@ RULES FOR EACH QUESTION
 - Self-contained: no reference to earlier questions or to "the above".
 - One main thing to answer. At most 60 words outside code blocks.
 - Technically correct and unambiguous; a strong ${LEVEL_LABEL[level].toLowerCase()} candidate should be able to answer in ${spec.answerSize}.
-- Put code only inside fenced blocks, and only when the topic is code-oriented and the type is coding or debugging.
+- Put code only inside fenced blocks, and only when the topic is code-oriented and the type is coding or debugging. Write the fence on its own lines, with one statement per line and real line breaks inside the block.
+- Depth follows the level, not the subtopic's reputation. If a subtopic is usually advanced (for example the event loop or garbage collection) and the level is beginner or intermediate, ask only about its most basic, widely known idea.
 - Vary the situation and wording across questions. Avoid reusing the same company, product or numbers.
 - expectedPoints: 3 to 5 concrete, checkable points a good answer contains, each under 25 words. Weight 3 = essential, 2 = expected, 1 = nice to mention. They must be correct and specific to this question.
 - commonMistakes: 0 to 3 typical wrong beliefs or errors candidates make on this question.
@@ -156,7 +157,7 @@ Audience: ${spec.audience}
 Scope: ${spec.scope}
 This level must NOT contain: ${spec.mustNotDo.join(' ')}
 
-Review each question. Mark levelFit "too_easy" if it is clearly below the level, "too_hard" if it clearly demands more than the level, otherwise "ok".
+Judge each question as it is worded: the depth it demands and the prerequisite knowledge it assumes, not the usual reputation of its subtopic. A basic question about an advanced-sounding subtopic can fit a beginner. Mark levelFit "too_easy" if it is clearly below the level, "too_hard" if it clearly demands more than the level, otherwise "ok".
 Mark onTopic false if it does not actually test the listed subtopic of ${topic.label}.
 Mark clear false if it is ambiguous, has more than one unrelated ask, is factually wrong, or cannot be answered from the text.
 

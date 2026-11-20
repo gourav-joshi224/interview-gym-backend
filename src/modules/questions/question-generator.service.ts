@@ -106,6 +106,7 @@ export class QuestionGeneratorService {
     const { system, prompt } = buildGenerationPrompt({ topic, level, slots, avoid });
     const response = await this.gemini.generateJson<{ questions?: RawQuestion[] }>({
       model: this.config.get<string>('gemini.model', 'gemini-3.8-flash'),
+      fallbackModels: this.config.get<string[]>('gemini.fallbackModels', []),
       system,
       prompt,
       schema: questionSchema(topic),

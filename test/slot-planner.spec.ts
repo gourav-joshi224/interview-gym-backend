@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { getTopicOrThrow } from '../src/modules/curriculum/curriculum.data';
+import { TOPICS, getTopicOrThrow } from '../src/modules/curriculum/curriculum.data';
 import { planSlots } from '../src/modules/questions/slot-planner';
 import { seeded } from './helpers';
 
@@ -56,4 +56,38 @@ test('focus concepts take up to half the slots and leave the subtopic open', () 
   assert.equal(focused.length, 3);
   assert.ok(focused.every((slot) => slot.subtopicId === null));
   assert.ok(slots.filter((slot) => !slot.focus).every((slot) => slot.subtopicId !== null));
+});
+
+const levelRank = { beginner: 0, intermediate: 1, advanced: 2 } as const;
+
+test('beginner sessions never automatically pick subtopics that are inherently intermediate', () => {
+  for (const topic of TOPICS) {
+    const harder = new Set(topic.subtopics.filter((item) => item.minLevel === 'intermediate').map((item) => item.id));
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const slots = planSlots({ topic, level: 'beginner', total: 10 }, seeded(seed));
+      assert.ok(slots.every((slot) => !harder.has(slot.subtopicId as string)), `${topic.id} seed ${seed}`);
+    }
+  }
+});
+
+test('every topic keeps a workable pool at beginner level', () => {
+  for (const topic of TOPICS) {
+    const pool = topic.subtopics.filter((item) => levelRank[item.minLevel ?? 'beginner'] <= levelRank.beginner);
+    assert.ok(pool.length >= 3, `${topic.id} has only ${pool.length} beginner subtopics`);
+  }
+});
+
+test('intermediate and advanced sessions can draw from every subtopic', () => {
+  for (const level of ['intermediate', 'advanced'] as const) {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 60; seed += 1) {
+      planSlots({ topic: js, level, total: js.subtopics.length }, seeded(seed)).forEach((slot) => seen.add(slot.subtopicId as string));
+    }
+    assert.equal(seen.size, js.subtopics.length);
+  }
+});
+
+test('an explicit subtopic choice is honoured even above the session level', () => {
+  const slots = planSlots({ topic: js, level: 'beginner', total: 3, subtopicIds: ['event-loop'] }, seeded(5));
+  assert.ok(slots.every((slot) => slot.subtopicId === 'event-loop'));
 });

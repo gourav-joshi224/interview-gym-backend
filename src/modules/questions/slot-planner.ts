@@ -1,4 +1,4 @@
-import { Level } from '../../domain/levels';
+import { LEVELS, Level } from '../../domain/levels';
 import { QuestionType, TopicDef } from '../curriculum/curriculum.data';
 
 export interface Slot {
@@ -57,7 +57,12 @@ export function planSlots(input: SlotPlanInput, rng: Rng = Math.random): Slot[] 
   const { topic, level, total } = input;
   const known = new Set(topic.subtopics.map((subtopic) => subtopic.id));
   const chosen = (input.subtopicIds ?? []).filter((id, i, all) => known.has(id) && all.indexOf(id) === i);
-  const pool = chosen.length > 0 ? chosen : topic.subtopics.map((subtopic) => subtopic.id);
+  // An explicit choice is always honoured. Otherwise skip subtopics that are inherently above this level.
+  const levelIndex = LEVELS.indexOf(level);
+  const automatic = topic.subtopics
+    .filter((subtopic) => LEVELS.indexOf(subtopic.minLevel ?? 'beginner') <= levelIndex)
+    .map((subtopic) => subtopic.id);
+  const pool = chosen.length > 0 ? chosen : automatic.length > 0 ? automatic : topic.subtopics.map((subtopic) => subtopic.id);
 
   const weights = (Object.entries(TYPE_WEIGHTS[level]) as Array<[QuestionType, number]>).filter(
     ([type]) => topic.supportsCode || type !== 'coding',
