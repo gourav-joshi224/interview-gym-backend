@@ -36,6 +36,7 @@ export interface PointResult {
 
 export interface QuestionResult {
   questionId: string;
+  topicId: string;
   score: number;
   concept: string;
   subtopic: string;
@@ -77,11 +78,16 @@ export interface InterviewFinalReport {
 
 export type SessionStatus = 'in_progress' | 'completed';
 
+export type SessionMode = 'standard' | 'resume';
+
 export interface StoredSession {
   sessionId: string;
   userId: string | null;
+  mode: SessionMode;
   topic: string;
+  /** For resume sessions this is "resume"; the real topics are in topicIds. */
   topicId: string;
+  topicIds: string[];
   level: Level;
   totalQuestions: number;
   status: SessionStatus;

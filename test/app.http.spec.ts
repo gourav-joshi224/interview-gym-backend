@@ -33,7 +33,20 @@ const POOL = [
 
 const gemini = new FakeGemini([]);
 // Respond by prompt content so the order of calls does not matter.
-gemini.generateJson = async <T>(input: { prompt: string; system: string }): Promise<T> => {
+gemini.generateJson = async <T>(input: { prompt: string; system: string; files?: unknown[] }): Promise<T> => {
+  if (input.files?.length) {
+    return {
+      isResume: true,
+      roleSummary: 'Backend engineer',
+      yearsExperience: 6,
+      skills: [
+        { topicId: 'nodejs', subtopicIds: ['http-middleware'], evidence: 'Built REST services', strength: 'core' },
+        { topicId: 'databases', subtopicIds: ['indexing'], evidence: 'Tuned Postgres queries', strength: 'used' },
+        { topicId: 'kubernetes', subtopicIds: [], evidence: 'Not a real topic', strength: 'core' },
+      ],
+      unmapped: ['Docker'],
+    } as T;
+  }
   if (input.prompt.includes('QUESTIONS\n[slot')) {
     return { verdicts: [...input.prompt.matchAll(/\[slot (\d+)\]/g)].map((m) => ({ slot: +m[1], onTopic: true, levelFit: 'ok', clear: true, reason: '' })) } as T;
   }
@@ -51,7 +64,7 @@ gemini.generateJson = async <T>(input: { prompt: string; system: string }): Prom
       summary: { strengths: ['s'], weakAreas: [], communicationFeedback: 'c', technicalFeedback: 't', improvementPlan: 'p' },
     } as T;
   }
-  const slots = [...input.prompt.matchAll(/- slot (\d+) \| subtopicId="([^"]+)"/g)];
+  const slots = [...input.prompt.matchAll(/- slot (\d+) \|(?: topic="[^"]+" \|)? subtopicId="([^"]+)"/g)];
   return { questions: slots.map((m, i) => rawQuestion({ slot: +m[1], subtopicId: m[2], question: POOL[i % POOL.length] })) } as T;
 };
 
@@ -116,21 +129,21 @@ const keys = (value: unknown) => Object.keys(value as object).sort();
 
 test('response shapes match what the frontend types expect', async () => {
   const started = (await (await call('/session/start', { uid: 'bob', body: { topic: 'dsa', level: 'beginner', totalQuestions: 2 } })).json()) as Record<string, unknown>;
-  assert.deepEqual(keys(started), ['done', 'level', 'question', 'questionId', 'questionNumber', 'sessionId', 'topic', 'totalQuestions']);
+  assert.deepEqual(keys(started), ['done', 'level', 'mode', 'question', 'questionId', 'questionNumber', 'sessionId', 'topic', 'totalQuestions']);
 
   const sessionId = started.sessionId as string;
   const progressed = (await (await call('/session/progress', { uid: 'bob', body: { sessionId, questionId: started.questionId, answer: 'First answer with enough words to count.' } })).json()) as Record<string, unknown>;
   assert.deepEqual(keys(progressed), ['done', 'ok', 'question', 'questionId', 'questionNumber', 'totalQuestions']);
 
   const state = (await (await call(`/session/${sessionId}`, { uid: 'bob' })).json()) as Record<string, unknown>;
-  assert.deepEqual(keys(state), ['answeredCount', 'done', 'focus', 'level', 'question', 'questionId', 'questionNumber', 'sessionId', 'status', 'topic', 'totalQuestions']);
+  assert.deepEqual(keys(state), ['answeredCount', 'done', 'focus', 'level', 'mode', 'question', 'questionId', 'questionNumber', 'sessionId', 'status', 'topic', 'totalQuestions']);
 
   await call('/session/progress', { uid: 'bob', body: { sessionId, questionId: progressed.questionId, answer: 'Second answer with enough words to count.' } });
   const finished = (await (await call('/session/finish', { uid: 'bob', body: { sessionId } })).json()) as Record<string, unknown>;
-  assert.deepEqual(keys(finished), ['answers', 'level', 'questionResults', 'report', 'sessionId', 'status', 'topic', 'topicId', 'totalQuestions']);
+  assert.deepEqual(keys(finished), ['answers', 'level', 'mode', 'questionResults', 'report', 'sessionId', 'status', 'topic', 'topicId', 'topicIds', 'totalQuestions']);
   assert.deepEqual(keys(finished.report), ['communicationFeedback', 'improvementPlan', 'learningResources', 'overallScore', 'readiness', 'skillBreakdown', 'strengths', 'technicalFeedback', 'weakAreas']);
   const result = (finished.questionResults as unknown[])[0];
-  assert.deepEqual(keys(result), ['attempt', 'concept', 'feedback', 'idealAnswer', 'misconceptions', 'missedCheckpoints', 'points', 'questionId', 'score', 'strengths', 'subtopic']);
+  assert.deepEqual(keys(result), ['attempt', 'concept', 'feedback', 'idealAnswer', 'misconceptions', 'missedCheckpoints', 'points', 'questionId', 'score', 'strengths', 'subtopic', 'topicId']);
   assert.deepEqual(keys((finished.answers as unknown[])[0]), ['answer', 'question', 'questionId']);
 });
 
@@ -169,4 +182,72 @@ test('full interview over HTTP: start, answer every question, finish, resume sta
   assert.equal(report.report.readiness, 'strong');
   assert.equal(report.questionResults.length, 3);
   assert.ok(report.report.learningResources.length > 0);
+});
+
+const upload = (bytes: Buffer | null, type = 'application/pdf', uid = 'alice') => {
+  const form = new FormData();
+  if (bytes) form.append('file', new Blob([new Uint8Array(bytes)], { type }), 'resume.pdf');
+  return fetch(`${base}/resume/analyze`, { method: 'POST', headers: { 'x-test-uid': uid }, body: form });
+};
+const PDF_BYTES = Buffer.from('%PDF-1.7\n% test body');
+
+test('POST /resume/analyze needs auth and a file', async () => {
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(PDF_BYTES)], { type: 'application/pdf' }), 'r.pdf');
+  assert.equal((await fetch(`${base}/resume/analyze`, { method: 'POST', body: form })).status, 403);
+  assert.equal((await upload(null)).status, 400);
+});
+
+test('POST /resume/analyze returns mapped skills and drops topics the app does not have', async () => {
+  const response = await upload(PDF_BYTES, 'application/pdf', 'resume-user');
+  assert.equal(response.status, 201);
+  const profile = (await response.json()) as { suggestedLevel: string; skills: Array<{ topicId: string }>; unmapped: string[] };
+  assert.equal(profile.suggestedLevel, 'advanced');
+  assert.deepEqual(profile.skills.map((skill) => skill.topicId), ['nodejs', 'databases']);
+  assert.deepEqual(profile.unmapped, ['Docker']);
+});
+
+test('POST /resume/analyze rejects non-PDF content however it is labelled', async () => {
+  assert.equal((await upload(Buffer.from('plain text'), 'text/plain', 'u-a')).status, 400);
+  assert.equal((await upload(Buffer.from('MZ not a pdf at all'), 'application/pdf', 'u-b')).status, 400);
+});
+
+test('POST /resume/analyze rejects files over 2 MB', async () => {
+  const big = Buffer.concat([PDF_BYTES, Buffer.alloc(2 * 1024 * 1024 + 10)]);
+  assert.ok([400, 413].includes((await upload(big, 'application/pdf', 'u-c')).status));
+});
+
+test('resume-mode session mixes the confirmed topics and records them', async () => {
+  const started = await call('/session/start', {
+    uid: 'rita',
+    body: {
+      mode: 'resume',
+      level: 'beginner',
+      totalQuestions: 4,
+      skills: [
+        { topicId: 'nodejs', subtopicIds: ['http-middleware'], strength: 'core' },
+        { topicId: 'databases', subtopicIds: ['indexing'], strength: 'used' },
+      ],
+    },
+  });
+  assert.equal(started.status, 201);
+  const body = (await started.json()) as { mode: string; topic: string; totalQuestions: number; questionId: string; sessionId: string };
+  assert.equal(body.mode, 'resume');
+  assert.equal(body.topic, 'Resume interview');
+  assert.equal(body.totalQuestions, 4);
+  assert.match(body.questionId, /^nodejs\.http-middleware::/);
+
+  const state = (await (await call(`/session/${body.sessionId}`, { uid: 'rita' })).json()) as { mode: string };
+  assert.equal(state.mode, 'resume');
+});
+
+test('resume-mode validation: skills required, unknown ids refused, topic optional only in resume mode', async () => {
+  const post = (body: unknown) => call('/session/start', { uid: 'rita', body });
+  assert.equal((await post({ mode: 'resume', level: 'beginner', totalQuestions: 3 })).status, 400);
+  assert.equal((await post({ mode: 'resume', level: 'beginner', totalQuestions: 3, skills: [] })).status, 400);
+  assert.equal((await post({ mode: 'resume', level: 'beginner', totalQuestions: 3, skills: [{ topicId: 'cobol', strength: 'core' }] })).status, 400);
+  assert.equal((await post({ mode: 'resume', level: 'beginner', totalQuestions: 3, skills: [{ topicId: 'nodejs', subtopicIds: ['event-loop'], strength: 'core' }] })).status, 400);
+  assert.equal((await post({ mode: 'resume', level: 'beginner', totalQuestions: 3, skills: [{ topicId: 'nodejs', strength: 'expert' }] })).status, 400);
+  assert.equal((await post({ mode: 'standard', level: 'beginner', totalQuestions: 3 })).status, 400);
+  assert.equal((await post({ level: 'beginner', totalQuestions: 3 })).status, 400);
 });

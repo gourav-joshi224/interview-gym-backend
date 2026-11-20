@@ -8,6 +8,8 @@ export interface GenerateJsonInput {
   fallbackModels?: string[];
   system: string;
   prompt: string;
+  /** Files sent to the model alongside the prompt (for example a PDF). Base64 data, never logged. */
+  files?: Array<{ mimeType: string; data: string }>;
   /** JSON Schema object; Gemini constrains its output to it. */
   schema: Record<string, unknown>;
   temperature?: number;
@@ -76,7 +78,17 @@ export class GeminiService {
         try {
           const response = await client.models.generateContent({
             model,
-            contents: input.prompt,
+            contents: input.files?.length
+              ? [
+                  {
+                    role: 'user',
+                    parts: [
+                      ...input.files.map((file) => ({ inlineData: { mimeType: file.mimeType, data: file.data } })),
+                      { text: input.prompt },
+                    ],
+                  },
+                ]
+              : input.prompt,
             config: {
               systemInstruction: input.system,
               responseMimeType: 'application/json',

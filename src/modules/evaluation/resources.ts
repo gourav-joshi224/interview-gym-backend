@@ -46,3 +46,10 @@ const RESOURCES: Record<string, LearningResource[]> = {
 export function resourcesForTopic(topicId: string): LearningResource[] {
   return RESOURCES[topicId] ?? [];
 }
+
+/** One topic gets all its links. A mixed session gets the first two per topic, capped at six, so the list stays scannable. */
+export function resourcesForTopics(topicIds: string[]): LearningResource[] {
+  const unique = [...new Set(topicIds)];
+  if (unique.length === 1) return resourcesForTopic(unique[0]);
+  return unique.flatMap((id) => resourcesForTopic(id).slice(0, 2)).slice(0, 6);
+}

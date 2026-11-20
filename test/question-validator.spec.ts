@@ -6,7 +6,7 @@ import { getTopicOrThrow } from '../src/modules/curriculum/curriculum.data';
 import { rawQuestion } from './helpers';
 
 const allowed = new Set(getTopicOrThrow('javascript').subtopics.map((subtopic) => subtopic.id));
-const slot: Slot = { index: 0, subtopicId: 'scope-closures', type: 'concept' };
+const slot: Slot = { index: 0, topicId: 'javascript', subtopicId: 'scope-closures', type: 'concept' };
 const ctx = (level: 'beginner' | 'intermediate' | 'advanced' = 'beginner', knownTexts: string[] = []) => ({
   level,
   allowedSubtopicIds: allowed,
@@ -32,7 +32,7 @@ test('rejects a beginner question about outages and on-call incidents', () => {
 test('does not flag a harmless beginner DSA question that mentions a big array', () => {
   const dsa = new Set(getTopicOrThrow('dsa').subtopics.map((subtopic) => subtopic.id));
   const ok = rawQuestion({ subtopicId: 'complexity', question: 'What is the time complexity of finding the maximum in an unsorted array of one million integers, and why?' });
-  const result = validateCandidate(ok, { index: 0, subtopicId: 'complexity', type: 'concept' }, { level: 'beginner', allowedSubtopicIds: dsa, knownTexts: [] });
+  const result = validateCandidate(ok, { index: 0, topicId: 'dsa', subtopicId: 'complexity', type: 'concept' }, { level: 'beginner', allowedSubtopicIds: dsa, knownTexts: [] });
   assert.equal(result.ok, true);
 });
 

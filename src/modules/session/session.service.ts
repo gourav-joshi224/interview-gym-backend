@@ -1,9 +1,10 @@
 import { ConflictException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { StoredSession } from '../../domain/session.types';
-import { TOPICS, findTopic } from '../curriculum/curriculum.data';
+import { StoredQuestionPlanItem, StoredSession } from '../../domain/session.types';
+import { TOPICS, TopicDef, findTopic } from '../curriculum/curriculum.data';
 import { EvaluationService } from '../evaluation/evaluation.service';
 import { QuestionGeneratorService } from '../questions/question-generator.service';
+import { allocateQuestions } from '../resume/resume.profile';
 import { StorageService } from '../storage/storage.service';
 import { FinishSessionDto } from './dto/finish-session.dto';
 import { ProgressSessionDto } from './dto/progress-session.dto';
@@ -31,17 +32,6 @@ export class SessionService {
   ) {}
 
   async start(userId: string, input: StartSessionDto) {
-    const topic = findTopic(input.topic);
-    if (!topic) {
-      throw new HttpException({ error: 'UNSUPPORTED_TOPIC', topic: input.topic, supported: TOPICS.map((item) => item.id) }, 400);
-    }
-
-    const known = new Set(topic.subtopics.map((subtopic) => subtopic.id));
-    const unknown = (input.subtopics ?? []).filter((id) => !known.has(id));
-    if (unknown.length > 0) {
-      throw new HttpException({ error: 'UNKNOWN_SUBTOPIC', subtopics: unknown }, 400);
-    }
-
     const dailyCap = this.config.get<number>('limits.maxSessionsPerDay', 30);
     const todays = await this.storage.countSessionsSince(userId, new Date(Date.now() - DAY_MS), dailyCap);
     if (todays >= dailyCap) {
@@ -51,15 +41,9 @@ export class SessionService {
       );
     }
 
-    const avoid = await this.storage.recentQuestionTexts(userId, topic.id);
-    const questionPlan = await this.generator.generate({
-      topic,
-      level: input.level,
-      total: input.totalQuestions,
-      subtopicIds: input.subtopics,
-      focus: input.focus?.map((item) => item.trim()).filter(Boolean),
-      avoid,
-    });
+    const mode = input.mode === 'resume' ? 'resume' : 'standard';
+    const { label, topicId, topicIds, questionPlan } =
+      mode === 'resume' ? await this.planResume(userId, input) : await this.planStandard(userId, input);
 
     if (questionPlan.length === 0) {
       throw new HttpException(
@@ -70,18 +54,21 @@ export class SessionService {
 
     const sessionId = await this.storage.createSession({
       userId,
-      topic: topic.label,
-      topicId: topic.id,
+      mode,
+      topic: label,
+      topicId,
+      topicIds,
       level: input.level,
       totalQuestions: questionPlan.length,
       questionPlan,
       focus: input.focus ?? [],
     });
-    this.logger.log(`session ${sessionId} started topic=${topic.id} level=${input.level} questions=${questionPlan.length}/${input.totalQuestions}`);
+    this.logger.log(`session ${sessionId} started mode=${mode} topics=${topicIds.join('+')} level=${input.level} questions=${questionPlan.length}/${input.totalQuestions}`);
 
     return {
       sessionId,
-      topic: topic.label,
+      mode,
+      topic: label,
       level: input.level,
       done: false,
       totalQuestions: questionPlan.length,
@@ -89,6 +76,69 @@ export class SessionService {
       question: questionPlan[0].renderedQuestion,
       questionId: questionPlan[0].questionId,
     };
+  }
+
+  private async planStandard(userId: string, input: StartSessionDto) {
+    const topic = findTopic(input.topic);
+    if (!topic) {
+      throw new HttpException({ error: 'UNSUPPORTED_TOPIC', topic: input.topic, supported: TOPICS.map((item) => item.id) }, 400);
+    }
+    const known = new Set(topic.subtopics.map((subtopic) => subtopic.id));
+    const unknown = (input.subtopics ?? []).filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw new HttpException({ error: 'UNKNOWN_SUBTOPIC', subtopics: unknown }, 400);
+    }
+
+    const avoid = await this.storage.recentQuestionTexts(userId, [topic.id]);
+    const questionPlan = await this.generator.generate({
+      topic,
+      level: input.level,
+      total: input.totalQuestions,
+      subtopicIds: input.subtopics,
+      focus: input.focus?.map((item) => item.trim()).filter(Boolean),
+      avoid,
+    });
+    return { label: topic.label, topicId: topic.id, topicIds: [topic.id], questionPlan };
+  }
+
+  /** The user already reviewed and confirmed these skills, so they are trusted only after id validation. */
+  private async planResume(userId: string, input: StartSessionDto) {
+    const skills = input.skills ?? [];
+    const merged = new Map<string, { topic: TopicDef; subtopicIds: Set<string>; strength: 'core' | 'used' | 'mentioned' }>();
+    for (const skill of skills) {
+      const topic = findTopic(skill.topicId);
+      if (!topic) {
+        throw new HttpException({ error: 'UNSUPPORTED_TOPIC', topic: skill.topicId, supported: TOPICS.map((item) => item.id) }, 400);
+      }
+      const known = new Set(topic.subtopics.map((subtopic) => subtopic.id));
+      const unknown = (skill.subtopicIds ?? []).filter((id) => !known.has(id));
+      if (unknown.length > 0) throw new HttpException({ error: 'UNKNOWN_SUBTOPIC', subtopics: unknown }, 400);
+
+      const existing = merged.get(topic.id);
+      const order = ['core', 'used', 'mentioned'];
+      if (existing) {
+        (skill.subtopicIds ?? []).forEach((id) => existing.subtopicIds.add(id));
+        if (order.indexOf(skill.strength) < order.indexOf(existing.strength)) existing.strength = skill.strength;
+      } else {
+        merged.set(topic.id, { topic, subtopicIds: new Set(skill.subtopicIds ?? []), strength: skill.strength });
+      }
+    }
+
+    const allocation = allocateQuestions(
+      [...merged.entries()].map(([topicId, value]) => ({ topicId, strength: value.strength })),
+      input.totalQuestions,
+    );
+    const topicIds = allocation.map((item) => item.topicId);
+    const avoid = await this.storage.recentQuestionTexts(userId, topicIds);
+    const questionPlan: StoredQuestionPlanItem[] = await this.generator.generateMixed({
+      level: input.level,
+      avoid,
+      groups: allocation.map((item) => {
+        const entry = merged.get(item.topicId) as { topic: TopicDef; subtopicIds: Set<string> };
+        return { topic: entry.topic, count: item.count, subtopicIds: [...entry.subtopicIds] };
+      }),
+    });
+    return { label: 'Resume interview', topicId: 'resume', topicIds, questionPlan };
   }
 
   async progress(userId: string, input: ProgressSessionDto) {
@@ -143,6 +193,7 @@ export class SessionService {
     const answered = session.answers.length;
     return {
       sessionId: session.sessionId,
+      mode: session.mode,
       status: session.status,
       topic: session.topic,
       level: session.level,
@@ -154,7 +205,7 @@ export class SessionService {
 
   private async runFinish(session: StoredSession): Promise<Record<string, unknown>> {
     const { report, questionResults } = await this.evaluation.evaluate({
-      topicId: session.topicId,
+      topicIds: session.topicIds,
       level: session.level,
       plan: session.questionPlan,
       answers: session.answers,
@@ -167,8 +218,10 @@ export class SessionService {
   private finishPayload(session: StoredSession): Record<string, unknown> {
     return {
       sessionId: session.sessionId,
+      mode: session.mode,
       topic: session.topic,
       topicId: session.topicId,
+      topicIds: session.topicIds,
       level: session.level,
       totalQuestions: session.totalQuestions,
       answers: session.answers,

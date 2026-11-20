@@ -12,6 +12,7 @@ import {
 } from '../../domain/session.types';
 import { findTopic } from '../curriculum/curriculum.data';
 import { Level } from '../../domain/levels';
+import { SessionMode } from '../../domain/session.types';
 
 const SESSIONS = 'interviewSessions';
 const USERS = 'users';
@@ -19,8 +20,10 @@ const SESSION_VERSION = 2;
 
 export interface NewSession {
   userId: string;
+  mode: SessionMode;
   topic: string;
   topicId: string;
+  topicIds: string[];
   level: Level;
   totalQuestions: number;
   questionPlan: StoredQuestionPlanItem[];
@@ -29,6 +32,7 @@ export interface NewSession {
 
 export interface SessionSummary {
   sessionId: string;
+  mode: SessionMode;
   topic: string;
   topicId: string;
   level: Level;
@@ -63,8 +67,10 @@ export class StorageService {
       .create(
         clean({
           userId: input.userId,
+          mode: input.mode,
           topic: input.topic,
           topicId: input.topicId,
+          topicIds: input.topicIds,
           level: input.level,
           totalQuestions: input.totalQuestions,
           questionPlan: input.questionPlan,
@@ -113,7 +119,7 @@ export class StorageService {
       .where('userId', '==', userId)
       .orderBy('createdAt', 'desc')
       .limit(limit)
-      .select('topic', 'topicId', 'level', 'difficulty', 'totalQuestions', 'status', 'report', 'createdAt')
+      .select('mode', 'topic', 'topicId', 'level', 'difficulty', 'totalQuestions', 'status', 'report', 'createdAt')
       .get();
 
     return snapshot.docs.map((doc) => {
@@ -122,6 +128,7 @@ export class StorageService {
       const topic = String(data.topic ?? '');
       return {
         sessionId: doc.id,
+        mode: (data.mode === 'resume' ? 'resume' : 'standard') as SessionMode,
         topic,
         topicId: String(data.topicId ?? findTopic(topic)?.id ?? ''),
         level: isLevel(data.level) ? data.level : levelFromLegacyDifficulty(data.difficulty as string | undefined),
@@ -134,8 +141,9 @@ export class StorageService {
     });
   }
 
-  /** Questions this user was recently asked on a topic, so new sessions do not repeat them. */
-  async recentQuestionTexts(userId: string, topicId: string, sessionLimit = 12): Promise<string[]> {
+  /** Questions this user was recently asked on any of these topics, so new sessions do not repeat them. */
+  async recentQuestionTexts(userId: string, topicIds: string[], sessionLimit = 12): Promise<string[]> {
+    const wanted = new Set(topicIds);
     const snapshot = await this.db
       .collection(SESSIONS)
       .where('userId', '==', userId)
@@ -147,10 +155,12 @@ export class StorageService {
     const texts: string[] = [];
     for (const doc of snapshot.docs) {
       const data = doc.data() as Doc;
+      if (!Array.isArray(data.questionPlan)) continue;
       const docTopicId = String(data.topicId ?? findTopic(String(data.topic ?? ''))?.id ?? '');
-      if (docTopicId !== topicId || !Array.isArray(data.questionPlan)) continue;
-      for (const item of data.questionPlan as Array<{ renderedQuestion?: unknown }>) {
-        if (typeof item?.renderedQuestion === 'string') texts.push(item.renderedQuestion);
+      for (const item of data.questionPlan as Array<{ renderedQuestion?: unknown; topicId?: unknown }>) {
+        // Newer plans record the topic per question; older single-topic plans fall back to the session topic.
+        const itemTopic = typeof item?.topicId === 'string' ? item.topicId : docTopicId;
+        if (wanted.has(itemTopic) && typeof item?.renderedQuestion === 'string') texts.push(item.renderedQuestion);
       }
     }
     return texts;
@@ -177,11 +187,14 @@ export class StorageService {
 
   private toSession(sessionId: string, data: Doc): StoredSession {
     const topic = String(data.topic ?? '');
+    const topicId = String(data.topicId ?? findTopic(topic)?.id ?? '');
     return {
       sessionId,
       userId: typeof data.userId === 'string' ? data.userId : null,
+      mode: data.mode === 'resume' ? 'resume' : 'standard',
       topic,
-      topicId: String(data.topicId ?? findTopic(topic)?.id ?? ''),
+      topicId,
+      topicIds: Array.isArray(data.topicIds) ? (data.topicIds as string[]) : topicId ? [topicId] : [],
       level: isLevel(data.level) ? data.level : levelFromLegacyDifficulty(data.difficulty as string | undefined),
       totalQuestions: Number(data.totalQuestions ?? 0),
       status: data.status === 'completed' ? 'completed' : 'in_progress',

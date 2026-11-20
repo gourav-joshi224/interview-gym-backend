@@ -12,7 +12,7 @@ import {
 import { findTopic } from '../curriculum/curriculum.data';
 import { AiUnavailableError, GeminiService } from '../llm/gemini.service';
 import { assessAttempt } from './attempt-gate';
-import { resourcesForTopic } from './resources';
+import { resourcesForTopics } from './resources';
 import { overallScore, readinessFor, scoreQuestion, skillBreakdown } from './scoring';
 
 interface RawPoint {
@@ -106,7 +106,7 @@ export class EvaluationService {
   ) {}
 
   async evaluate(input: {
-    topicId: string;
+    topicIds: string[];
     level: Level;
     plan: StoredQuestionPlanItem[];
     answers: SessionAnswer[];
@@ -134,7 +134,7 @@ export class EvaluationService {
     const summary = graded.summary;
     const weakFromScores = breakdown.filter((skill) => skill.score < 6).map((skill) => skill.skill);
     const weakAreas = clipList(summary?.weakAreas, 6, 80);
-    const topic = findTopic(input.topicId);
+    const topic = input.topicIds.length === 1 ? findTopic(input.topicIds[0]) : null;
 
     const report: InterviewFinalReport = {
       overallScore: score,
@@ -149,9 +149,9 @@ export class EvaluationService {
         'No assessable technical content. Attempt each question even if you are unsure; partial reasoning earns partial credit.',
       improvementPlan:
         clip(summary?.improvementPlan, 1200) ||
-        `Review the fundamentals of ${topic?.label ?? 'this topic'} and retry at ${LEVEL_LABEL[level]} level.`,
+        `Review the fundamentals of ${topic?.label ?? 'the topics in this interview'} and retry at ${LEVEL_LABEL[level]} level.`,
       skillBreakdown: breakdown,
-      learningResources: resourcesForTopic(topic?.id ?? input.topicId),
+      learningResources: resourcesForTopics(input.topicIds),
     };
 
     return { report, questionResults };
@@ -251,6 +251,7 @@ ${blocks.join('\n\n')}`.trim();
 
     return {
       questionId: item.questionId,
+      topicId: item.topicId,
       score,
       concept: item.concept,
       subtopic: item.subtopic,
@@ -270,6 +271,7 @@ ${blocks.join('\n\n')}`.trim();
   private skippedResult(item: StoredQuestionPlanItem, reason: string): QuestionResult {
     return {
       questionId: item.questionId,
+      topicId: item.topicId,
       score: 0,
       concept: item.concept,
       subtopic: item.subtopic,

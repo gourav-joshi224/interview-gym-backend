@@ -6,6 +6,7 @@ import envConfig from './config/env.config';
 import { CurriculumModule } from './modules/curriculum/curriculum.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HealthController } from './modules/health/health.controller';
+import { ResumeModule } from './modules/resume/resume.module';
 import { SessionModule } from './modules/session/session.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { UsersModule } from './modules/users/users.module';
@@ -16,6 +17,7 @@ import { UsersModule } from './modules/users/users.module';
     StorageModule,
     CurriculumModule,
     SessionModule,
+    ResumeModule,
     DashboardModule,
     UsersModule,
   ],

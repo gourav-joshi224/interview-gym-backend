@@ -3,6 +3,7 @@ import { QuestionType, TopicDef } from '../curriculum/curriculum.data';
 
 export interface Slot {
   index: number;
+  topicId: string;
   /** Null for focus slots where the model picks the best-fitting subtopic. */
   subtopicId: string | null;
   type: QuestionType;
@@ -79,10 +80,29 @@ export function planSlots(input: SlotPlanInput, rng: Rng = Math.random): Slot[] 
     const focusText = focus[index];
     slots.push({
       index,
+      topicId: topic.id,
       subtopicId: focusText ? null : order[index % order.length],
       type,
       ...(focusText ? { focus: focusText } : {}),
     });
   }
   return slots;
+}
+
+export interface SlotGroup extends Omit<SlotPlanInput, 'level' | 'total'> {
+  count: number;
+}
+
+/**
+ * Plans slots for several topics (resume interviews). Each topic is planned on its own, then the
+ * questions are interleaved so the session alternates topics, and slots are renumbered 0..n-1.
+ */
+export function planMixedSlots(groups: SlotGroup[], level: Level, rng: Rng = Math.random): Slot[] {
+  const perTopic = groups.map((group) => planSlots({ ...group, level, total: group.count }, rng));
+  const mixed: Slot[] = [];
+  const longest = Math.max(0, ...perTopic.map((slots) => slots.length));
+  for (let i = 0; i < longest; i += 1) {
+    for (const slots of perTopic) if (i < slots.length) mixed.push(slots[i]);
+  }
+  return mixed.map((slot, index) => ({ ...slot, index }));
 }

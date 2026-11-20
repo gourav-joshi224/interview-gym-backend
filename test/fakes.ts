@@ -28,8 +28,10 @@ export class FakeStorage {
     this.sessions.set(sessionId, {
       sessionId,
       userId: input.userId,
+      mode: input.mode,
       topic: input.topic,
       topicId: input.topicId,
+      topicIds: input.topicIds,
       level: input.level as Level,
       totalQuestions: input.totalQuestions,
       status: 'in_progress',

@@ -82,7 +82,7 @@ export default () => ({
       .split(',')
       .map((model) => model.trim())
       .filter(Boolean),
-    judgeModel: process.env.GEMINI_JUDGE_MODEL?.trim() || 'gemini-3.5-flash-lite',
+    judgeModel: process.env.GEMINI_JUDGE_MODEL?.trim() || 'gemini-3.1-flash-lite',
     judgeEnabled: (process.env.QUESTION_JUDGE_ENABLED ?? 'true').toLowerCase() !== 'false',
     generationThinking: (process.env.GEMINI_GENERATION_THINKING ?? 'low').trim().toLowerCase(),
     gradingThinking: (process.env.GEMINI_GRADING_THINKING ?? 'medium').trim().toLowerCase(),

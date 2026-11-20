@@ -17,7 +17,8 @@ export function sanitizeInline(value: string, max = 80): string {
   return value.replace(/[\r\n`"\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-export function questionSchema(topic: TopicDef): Record<string, unknown> {
+/** Subtopic ids are unique across topics, so one schema can serve a mixed-topic session. */
+export function questionSchema(topics: TopicDef[]): Record<string, unknown> {
   return {
     type: 'object',
     properties: {
@@ -27,7 +28,7 @@ export function questionSchema(topic: TopicDef): Record<string, unknown> {
           type: 'object',
           properties: {
             slot: { type: 'integer', description: 'The slot number this question answers.' },
-            subtopicId: { type: 'string', enum: topic.subtopics.map((subtopic) => subtopic.id) },
+            subtopicId: { type: 'string', enum: topics.flatMap((topic) => topic.subtopics.map((subtopic) => subtopic.id)) },
             type: { type: 'string', enum: QUESTION_TYPES },
             level: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
             concept: { type: 'string', description: 'The specific concept tested, at most 5 words.' },
@@ -54,15 +55,18 @@ export function questionSchema(topic: TopicDef): Record<string, unknown> {
 }
 
 export function buildGenerationPrompt(input: {
-  topic: TopicDef;
+  topics: TopicDef[];
   level: Level;
   slots: Slot[];
   avoid: string[];
 }): { system: string; prompt: string } {
-  const { topic, level, slots, avoid } = input;
+  const { topics, level, slots, avoid } = input;
   const spec = LEVEL_SPEC[level];
-  const subtopicLabel = (id: string | null) =>
-    topic.subtopics.find((subtopic) => subtopic.id === id)?.label ?? 'choose the best-fitting subtopic';
+  const topicById = new Map(topics.map((topic) => [topic.id, topic]));
+  const subtopicLabel = (slot: Slot) =>
+    topicById.get(slot.topicId)?.subtopics.find((subtopic) => subtopic.id === slot.subtopicId)?.label ??
+    'choose the best-fitting subtopic';
+  const multi = topics.length > 1;
 
   const system = [
     'You are a senior engineer who runs technical interviews and writes high-quality questions for a mock-interview platform.',
@@ -74,7 +78,8 @@ export function buildGenerationPrompt(input: {
     .map((slot) => {
       const parts = [
         `slot ${slot.index}`,
-        slot.subtopicId ? `subtopicId="${slot.subtopicId}" (${subtopicLabel(slot.subtopicId)})` : 'subtopicId: pick the best fit from the schema enum',
+        ...(multi ? [`topic="${topicById.get(slot.topicId)?.label ?? slot.topicId}"`] : []),
+        slot.subtopicId ? `subtopicId="${slot.subtopicId}" (${subtopicLabel(slot)})` : 'subtopicId: pick the best fit from the schema enum',
         `type="${slot.type}"`,
       ];
       if (slot.focus) parts.push(`target this weak concept: "${sanitizeInline(slot.focus)}"`);
@@ -90,7 +95,7 @@ export function buildGenerationPrompt(input: {
       : '';
 
   const prompt = `
-TOPIC: ${topic.label}. ${topic.description}
+${topics.map((topic) => `TOPIC: ${topic.label}. ${topic.description}`).join('\n')}
 LEVEL: ${LEVEL_LABEL[level]}
 Audience: ${spec.audience}
 Scope: ${spec.scope}
@@ -108,7 +113,7 @@ ${slotLines}
 RULES FOR EACH QUESTION
 - Self-contained: no reference to earlier questions or to "the above".
 - One main thing to answer. At most 60 words outside code blocks.
-- Technically correct and unambiguous; a strong ${LEVEL_LABEL[level].toLowerCase()} candidate should be able to answer in ${spec.answerSize}.
+- Technically correct and unambiguous; a strong ${LEVEL_LABEL[level].toLowerCase()} candidate should be able to answer in ${spec.answerSize}.${multi ? '\n- Each question tests only its own slot topic. Do not mix topics inside one question.' : ''}
 - Put code only inside fenced blocks, and only when the topic is code-oriented and the type is coding or debugging. Write the fence on its own lines, with one statement per line and real line breaks inside the block.
 - Depth follows the level, not the subtopic's reputation. If a subtopic is usually advanced (for example the event loop or garbage collection) and the level is beginner or intermediate, ask only about its most basic, widely known idea.
 - Vary the situation and wording across questions. Avoid reusing the same company, product or numbers.
@@ -141,27 +146,25 @@ export const judgeSchema = {
 };
 
 export function buildJudgePrompt(input: {
-  topic: TopicDef;
   level: Level;
-  items: Array<{ slot: number; subtopic: string; question: string }>;
+  items: Array<{ slot: number; topic: string; subtopic: string; question: string }>;
 }): { system: string; prompt: string } {
-  const { topic, level, items } = input;
+  const { level, items } = input;
   const spec = LEVEL_SPEC[level];
   return {
     system:
       'You are a strict reviewer of interview questions. You check topic relevance, difficulty calibration, clarity and technical correctness. Be critical but fair.',
     prompt: `
-TOPIC: ${topic.label}
 TARGET LEVEL: ${LEVEL_LABEL[level]}
 Audience: ${spec.audience}
 Scope: ${spec.scope}
 This level must NOT contain: ${spec.mustNotDo.join(' ')}
 
 Judge each question as it is worded: the depth it demands and the prerequisite knowledge it assumes, not the usual reputation of its subtopic. A basic question about an advanced-sounding subtopic can fit a beginner. Mark levelFit "too_easy" if it is clearly below the level, "too_hard" if it clearly demands more than the level, otherwise "ok".
-Mark onTopic false if it does not actually test the listed subtopic of ${topic.label}.
+Mark onTopic false if it does not actually test the listed topic and subtopic.
 Mark clear false if it is ambiguous, has more than one unrelated ask, is factually wrong, or cannot be answered from the text.
 
 QUESTIONS
-${items.map((item) => `[slot ${item.slot}] subtopic: ${item.subtopic}\n${item.question}`).join('\n\n')}`.trim(),
+${items.map((item) => `[slot ${item.slot}] topic: ${item.topic} | subtopic: ${item.subtopic}\n${item.question}`).join('\n\n')}`.trim(),
   };
 }
