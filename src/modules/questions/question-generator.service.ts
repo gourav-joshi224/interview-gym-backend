@@ -27,7 +27,7 @@ interface JudgeVerdict {
   reason?: string;
 }
 
-const MAX_ROUNDS = 2;
+const MAX_ROUNDS = 3;
 const MAX_AVOID = 25;
 
 @Injectable()
@@ -42,7 +42,8 @@ export class QuestionGeneratorService {
   /**
    * Plans slots in code, has Gemini write one question per slot, rejects bad ones with
    * deterministic checks plus a batched reviewer call, and regenerates only the rejected slots.
-   * Returns fewer questions than requested only when generation keeps failing; never padded with junk.
+   * A question the reviewer rejected is never shown. If a slot still has no acceptable question after
+   * the retry rounds, fewer questions are returned (or none, which the session service turns into a 503).
    */
   async generate(input: GenerateQuestionsInput): Promise<StoredQuestionPlanItem[]> {
     const { topic, level } = input;
@@ -57,8 +58,6 @@ export class QuestionGeneratorService {
     const allowedSubtopicIds = new Set(topic.subtopics.map((subtopic) => subtopic.id));
 
     const accepted = new Map<number, CleanQuestion>();
-    // Passed code checks but failed the reviewer. Used only if regeneration does not do better.
-    const reserve = new Map<number, CleanQuestion>();
     let pending = slots;
 
     for (let round = 1; round <= MAX_ROUNDS && pending.length > 0; round += 1) {
@@ -76,20 +75,13 @@ export class QuestionGeneratorService {
         const verdict = verdicts.get(candidate.slot);
         if (!verdict || this.passes(verdict)) {
           accepted.set(candidate.slot, candidate);
-          reserve.delete(candidate.slot);
         } else {
           this.logger.warn(
             `Reviewer rejected slot ${candidate.slot} (${topic.id}/${level}): onTopic=${verdict.onTopic} levelFit=${verdict.levelFit} clear=${verdict.clear} ${verdict.reason ?? ''}`,
           );
-          reserve.set(candidate.slot, candidate);
         }
       }
       pending = slots.filter((slot) => !accepted.has(slot.index));
-    }
-
-    for (const slot of pending) {
-      const fallback = reserve.get(slot.index);
-      if (fallback) accepted.set(slot.index, fallback);
     }
 
     const ordered = slots.filter((slot) => accepted.has(slot.index)).map((slot) => accepted.get(slot.index) as CleanQuestion);

@@ -83,6 +83,7 @@ export class SessionService {
       sessionId,
       topic: topic.label,
       level: input.level,
+      done: false,
       totalQuestions: questionPlan.length,
       questionNumber: 1,
       question: questionPlan[0].renderedQuestion,

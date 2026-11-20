@@ -112,6 +112,28 @@ test('input validation rejects bad levels, counts and oversized answers', async 
   assert.equal(huge.status, 400);
 });
 
+const keys = (value: unknown) => Object.keys(value as object).sort();
+
+test('response shapes match what the frontend types expect', async () => {
+  const started = (await (await call('/session/start', { uid: 'bob', body: { topic: 'dsa', level: 'beginner', totalQuestions: 2 } })).json()) as Record<string, unknown>;
+  assert.deepEqual(keys(started), ['done', 'level', 'question', 'questionId', 'questionNumber', 'sessionId', 'topic', 'totalQuestions']);
+
+  const sessionId = started.sessionId as string;
+  const progressed = (await (await call('/session/progress', { uid: 'bob', body: { sessionId, questionId: started.questionId, answer: 'First answer with enough words to count.' } })).json()) as Record<string, unknown>;
+  assert.deepEqual(keys(progressed), ['done', 'ok', 'question', 'questionId', 'questionNumber', 'totalQuestions']);
+
+  const state = (await (await call(`/session/${sessionId}`, { uid: 'bob' })).json()) as Record<string, unknown>;
+  assert.deepEqual(keys(state), ['answeredCount', 'done', 'focus', 'level', 'question', 'questionId', 'questionNumber', 'sessionId', 'status', 'topic', 'totalQuestions']);
+
+  await call('/session/progress', { uid: 'bob', body: { sessionId, questionId: progressed.questionId, answer: 'Second answer with enough words to count.' } });
+  const finished = (await (await call('/session/finish', { uid: 'bob', body: { sessionId } })).json()) as Record<string, unknown>;
+  assert.deepEqual(keys(finished), ['answers', 'level', 'questionResults', 'report', 'sessionId', 'status', 'topic', 'topicId', 'totalQuestions']);
+  assert.deepEqual(keys(finished.report), ['communicationFeedback', 'improvementPlan', 'learningResources', 'overallScore', 'readiness', 'skillBreakdown', 'strengths', 'technicalFeedback', 'weakAreas']);
+  const result = (finished.questionResults as unknown[])[0];
+  assert.deepEqual(keys(result), ['attempt', 'concept', 'feedback', 'idealAnswer', 'misconceptions', 'missedCheckpoints', 'points', 'questionId', 'score', 'strengths', 'subtopic']);
+  assert.deepEqual(keys((finished.answers as unknown[])[0]), ['answer', 'question', 'questionId']);
+});
+
 test('full interview over HTTP: start, answer every question, finish, resume state', async () => {
   const started = await call('/session/start', {
     uid: 'alice',

@@ -119,14 +119,31 @@ test('returns fewer questions, never padding, when generation keeps failing', as
   assert.equal(plan.length, 0);
 });
 
-test('uses a reviewer-rejected question as a last resort rather than shipping fewer', async () => {
-  const rejectAll = (input: { prompt: string }) => ({
-    verdicts: [...input.prompt.matchAll(/\[slot (\d+)\]/g)].map((m) => ({ slot: Number(m[1]), onTopic: true, levelFit: 'too_hard', clear: true, reason: 'hard' })),
+test('never shows a question the reviewer rejected, even when regeneration keeps failing', async () => {
+  const rejectSlot = (rejected: number) => (input: { prompt: string }) => ({
+    verdicts: [...input.prompt.matchAll(/\[slot (\d+)\]/g)].map((m) => ({
+      slot: Number(m[1]),
+      onTopic: true,
+      levelFit: Number(m[1]) === rejected ? 'too_hard' : 'ok',
+      clear: true,
+      reason: 'too advanced for a beginner',
+    })),
   });
-  const gemini = new FakeGemini([answerSlots(QUESTIONS), rejectAll, () => ({ questions: [] }), rejectAll]);
+  const gemini = new FakeGemini([
+    answerSlots(QUESTIONS),
+    rejectSlot(1),
+    answerSlots(['An advanced question about sharding strategies across regions that a beginner could not answer']),
+    rejectSlot(1),
+    answerSlots(['Another advanced question about consensus protocols that is far above beginner level here']),
+    rejectSlot(1),
+  ]);
   const service = new QuestionGeneratorService(gemini as never, config as never);
+
   const plan = await service.generate({ topic, level: 'beginner', total: 3, subtopicIds: ['scope-closures'] });
-  assert.equal(plan.length, 3);
+
+  assert.equal(plan.length, 2);
+  assert.ok(plan.every((item) => !/sharding|consensus/.test(item.renderedQuestion)));
+  assert.equal(gemini.calls.length, 6);
 });
 
 test('honours QUESTION_JUDGE_ENABLED=false by skipping the reviewer call', async () => {
