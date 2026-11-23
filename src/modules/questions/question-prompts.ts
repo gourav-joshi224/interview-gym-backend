@@ -4,6 +4,12 @@ import { QUESTION_TYPES } from './question-validator';
 import { pickAnchors } from '../curriculum/anchors';
 import { Slot } from './slot-planner';
 
+/**
+ * Version of the question prompt and anchors. Pooled questions carry it, so bumping it retires the old pool.
+ * Bump when a change would make previously generated questions worse or off-level.
+ */
+export const QUESTION_PROMPT_VERSION = 1;
+
 const TYPE_GUIDE: Record<QuestionType, string> = {
   concept: 'Ask the candidate to explain a concept, a mechanism, or why something works the way it does.',
   scenario: 'A short realistic situation (2 sentences at most). Ask what they would do or what will happen.',

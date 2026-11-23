@@ -11,11 +11,13 @@ import {
   StoredSession,
 } from '../../domain/session.types';
 import { findTopic } from '../curriculum/curriculum.data';
+import { PooledQuestion } from '../questions/question-pool.types';
 import { Level } from '../../domain/levels';
 import { SessionMode } from '../../domain/session.types';
 
 const SESSIONS = 'interviewSessions';
 const USERS = 'users';
+const POOL = 'questionPool';
 const SESSION_VERSION = 2;
 
 export interface NewSession {
@@ -181,6 +183,48 @@ export class StorageService {
       .limit(cap)
       .get();
     return snapshot.size;
+  }
+
+  /** Reviewed questions for one subtopic and level. Equality filters only, so no composite index is needed. */
+  async poolCandidates(subtopicId: string, level: Level, promptVersion: number, limit: number): Promise<PooledQuestion[]> {
+    const snapshot = await this.db
+      .collection(POOL)
+      .where('subtopicId', '==', subtopicId)
+      .where('level', '==', level)
+      .where('promptVersion', '==', promptVersion)
+      .limit(limit)
+      .get();
+    return snapshot.docs.map((doc) => ({ ...(doc.data() as Omit<PooledQuestion, 'id' | 'uses'>), id: doc.id, uses: Number((doc.data() as Doc).uses ?? 0) }));
+  }
+
+  /** Stores new questions. An id that already exists is left alone, so concurrent sessions cannot overwrite each other. */
+  async poolSave(items: PooledQuestion[]): Promise<number> {
+    let saved = 0;
+    for (const item of items) {
+      const { id, ...data } = item;
+      try {
+        await this.db
+          .collection(POOL)
+          .doc(id)
+          .create({ ...clean(data), uses: 0, createdAt: FieldValue.serverTimestamp() });
+        saved += 1;
+      } catch (error) {
+        // 6 = ALREADY_EXISTS in Firestore's gRPC codes: another session stored the same question first.
+        if ((error as { code?: number }).code !== 6) throw error;
+      }
+    }
+    return saved;
+  }
+
+  async poolMarkUsed(ids: string[]): Promise<void> {
+    await Promise.all(
+      ids.map((id) =>
+        this.db
+          .collection(POOL)
+          .doc(id)
+          .update({ uses: FieldValue.increment(1), lastUsedAt: FieldValue.serverTimestamp() }),
+      ),
+    );
   }
 
   async upsertUser(uid: string, name: string, email: string): Promise<void> {

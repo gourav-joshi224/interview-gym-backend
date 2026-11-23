@@ -68,6 +68,10 @@ export const validateEnv = (): void => {
     );
   }
 
+  const freshRate = Number(process.env.QUESTION_POOL_FRESH_RATE ?? 0.1);
+  if (!Number.isFinite(freshRate) || freshRate < 0 || freshRate > 1) fail('QUESTION_POOL_FRESH_RATE', 'must be a number from 0 to 1');
+  positiveInt('QUESTION_POOL_MIN_TO_REUSE', process.env.QUESTION_POOL_MIN_TO_REUSE, 3);
+  positiveInt('QUESTION_POOL_MAX_PER_SUBTOPIC', process.env.QUESTION_POOL_MAX_PER_SUBTOPIC, 60);
   positiveInt('MAX_SESSIONS_PER_DAY', process.env.MAX_SESSIONS_PER_DAY, 30);
 };
 
@@ -87,6 +91,12 @@ export default () => ({
     generationThinking: (process.env.GEMINI_GENERATION_THINKING ?? 'low').trim().toLowerCase(),
     gradingThinking: (process.env.GEMINI_GRADING_THINKING ?? 'medium').trim().toLowerCase(),
     timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS ?? 30000),
+  },
+  pool: {
+    enabled: (process.env.QUESTION_POOL_ENABLED ?? 'true').toLowerCase() !== 'false',
+    minToReuse: Number(process.env.QUESTION_POOL_MIN_TO_REUSE ?? 3),
+    freshRate: Number(process.env.QUESTION_POOL_FRESH_RATE ?? 0.1),
+    maxPerKey: Number(process.env.QUESTION_POOL_MAX_PER_SUBTOPIC ?? 60),
   },
   limits: {
     maxSessionsPerDay: Number(process.env.MAX_SESSIONS_PER_DAY ?? 30),

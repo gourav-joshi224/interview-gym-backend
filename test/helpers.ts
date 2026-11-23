@@ -50,3 +50,22 @@ export function planItem(index: number, overrides: Partial<StoredQuestionPlanIte
     ...overrides,
   };
 }
+
+import { QuestionGeneratorService } from '../src/modules/questions/question-generator.service';
+import { QuestionPoolService } from '../src/modules/questions/question-pool.service';
+import { FakeStorage } from './fakes';
+
+/** Pool service whose randomness is fixed, so "fresh generation" is decided by the test and not by chance. */
+export class TestPool extends QuestionPoolService {
+  constructor(storage: FakeStorage, config: ReturnType<typeof fakeConfig>, private readonly roll = 0.99) {
+    super(storage as never, config as never);
+  }
+  protected override random(): number {
+    return this.roll;
+  }
+}
+
+export function makeGenerator(gemini: unknown, config: ReturnType<typeof fakeConfig>, storage = new FakeStorage(), roll = 0.99) {
+  const pool = new TestPool(storage, config, roll);
+  return { generator: new QuestionGeneratorService(gemini as never, config as never, pool), storage, pool };
+}

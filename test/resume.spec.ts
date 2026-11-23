@@ -2,12 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { HttpException } from '@nestjs/common';
 import { getTopicOrThrow } from '../src/modules/curriculum/curriculum.data';
-import { QuestionGeneratorService } from '../src/modules/questions/question-generator.service';
 import { planMixedSlots } from '../src/modules/questions/slot-planner';
 import { allocateQuestions, cleanText, interleave, sanitizeResumeAnalysis, suggestLevel } from '../src/modules/resume/resume.profile';
 import { ResumeService } from '../src/modules/resume/resume.service';
 import { FakeGemini } from './fakes';
-import { fakeConfig, rawQuestion, seeded } from './helpers';
+import { fakeConfig, makeGenerator, rawQuestion, seeded } from './helpers';
 
 const PDF = Buffer.from('%PDF-1.7\n%fake body');
 const analysis = (overrides: Record<string, unknown> = {}) => ({
@@ -174,7 +173,7 @@ test('generates one question per slot across topics and tags each with its own t
     }),
     approveAll,
   ]);
-  const generator = new QuestionGeneratorService(gemini as never, config as never);
+  const generator = makeGenerator(gemini, config).generator;
 
   const plan = await generator.generateMixed({
     level: 'intermediate',
@@ -205,7 +204,7 @@ test('rejects a question whose subtopic belongs to another topic in the mix', as
     () => ({ questions: [] }),
     approveAll,
   ]);
-  const generator = new QuestionGeneratorService(gemini as never, config as never);
+  const generator = makeGenerator(gemini, config).generator;
   const plan = await generator.generateMixed({
     level: 'intermediate',
     groups: [

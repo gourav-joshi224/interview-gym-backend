@@ -7,6 +7,7 @@ import { TopicDef, subtopicLabel } from '../curriculum/curriculum.data';
 import { AiUnavailableError, GeminiService } from '../llm/gemini.service';
 import { buildGenerationPrompt, buildJudgePrompt, judgeSchema, questionSchema } from './question-prompts';
 import { CleanQuestion, RawQuestion, validateCandidate } from './question-validator';
+import { QuestionPoolService } from './question-pool.service';
 import { Slot, SlotGroup, planMixedSlots, planSlots } from './slot-planner';
 
 export interface GenerateQuestionsInput {
@@ -17,6 +18,8 @@ export interface GenerateQuestionsInput {
   focus?: string[];
   /** Questions this user has already seen on this topic. */
   avoid?: string[];
+  /** False skips reading the shared pool, used when deliberately filling it. Newly written questions are still pooled. */
+  usePool?: boolean;
 }
 
 export interface MixedQuestionsInput {
@@ -43,6 +46,7 @@ export class QuestionGeneratorService {
   constructor(
     private readonly gemini: GeminiService,
     private readonly config: ConfigService,
+    private readonly pool: QuestionPoolService,
   ) {}
 
   /**
@@ -59,7 +63,7 @@ export class QuestionGeneratorService {
       subtopicIds: input.subtopicIds,
       focus: input.focus,
     });
-    return this.run(slots, [input.topic], input.level, input.avoid);
+    return this.run(slots, [input.topic], input.level, input.avoid, input.usePool !== false);
   }
 
   /** Several topics in one session (resume interviews). Questions alternate between topics. */
@@ -76,6 +80,7 @@ export class QuestionGeneratorService {
       input.groups.map((group) => group.topic),
       input.level,
       input.avoid,
+      true,
     );
   }
 
@@ -84,13 +89,25 @@ export class QuestionGeneratorService {
     topics: TopicDef[],
     level: Level,
     avoidInput: string[] = [],
+    usePool = true,
   ): Promise<StoredQuestionPlanItem[]> {
     const avoid = avoidInput.slice(0, MAX_AVOID);
     const topicById = new Map(topics.map((topic) => [topic.id, topic]));
     const label = topics.map((topic) => topic.id).join('+');
 
     const accepted = new Map<number, CleanQuestion>();
-    let pending = slots;
+
+    // Reuse reviewed questions first. Only what the pool cannot cover is sent to Gemini.
+    const fromPool = usePool
+      ? await this.pool.fill({ slots, topicById, level, avoid: avoidInput, accepted })
+      : { servedIds: [] as string[], fetched: new Map() };
+    let pending = slots.filter((slot) => !accepted.has(slot.index));
+    if (fromPool.servedIds.length > 0) {
+      this.logger.log(`question pool: ${fromPool.servedIds.length}/${slots.length} slots reused for ${label}/${level}, ${pending.length} to generate`);
+    }
+
+    // Only questions the reviewer explicitly approved are good enough to share with other users.
+    const approved = new Set<number>();
 
     for (let round = 1; round <= MAX_ROUNDS && pending.length > 0; round += 1) {
       let candidates: CleanQuestion[];
@@ -107,6 +124,7 @@ export class QuestionGeneratorService {
         const verdict = verdicts.get(candidate.slot);
         if (!verdict || this.passes(verdict)) {
           accepted.set(candidate.slot, candidate);
+          if (verdict) approved.add(candidate.slot);
         } else {
           this.logger.warn(
             `Reviewer rejected slot ${candidate.slot} (${label}/${level}): onTopic=${verdict.onTopic} levelFit=${verdict.levelFit} clear=${verdict.clear} ${verdict.reason ?? ''}`,
@@ -115,6 +133,16 @@ export class QuestionGeneratorService {
       }
       pending = slots.filter((slot) => !accepted.has(slot.index));
     }
+
+    const slotById = new Map(slots.map((slot) => [slot.index, slot]));
+    await Promise.all([
+      this.pool.remember(
+        [...approved].map((index) => ({ slot: slotById.get(index) as Slot, question: accepted.get(index) as CleanQuestion })),
+        level,
+        fromPool.fetched,
+      ),
+      this.pool.markUsed(fromPool.servedIds),
+    ]);
 
     const ordered = slots.filter((slot) => accepted.has(slot.index)).map((slot) => ({ slot, question: accepted.get(slot.index) as CleanQuestion }));
     if (ordered.length < slots.length) {

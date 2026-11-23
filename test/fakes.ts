@@ -2,6 +2,7 @@ import { SessionAnswer, StoredQuestionPlanItem, StoredSession } from '../src/dom
 import { Level } from '../src/domain/levels';
 import { GenerateJsonInput } from '../src/modules/llm/gemini.service';
 import { NewSession } from '../src/modules/storage/storage.service';
+import { PooledQuestion } from '../src/modules/questions/question-pool.types';
 
 /** Gemini stand-in: each call is answered by the next scripted responder, and every request is recorded. */
 export class FakeGemini {
@@ -58,6 +59,38 @@ export class FakeStorage {
     session.questionResults = results;
     this.completed.push(id);
   }
+  // ---- question pool
+  pool = new Map<string, PooledQuestion>();
+  poolReads = 0;
+  poolWrites = 0;
+  usedLog: string[] = [];
+  failPoolRead = false;
+  failPoolWrite = false;
+
+  async poolCandidates(subtopicId: string, level: string, promptVersion: number, limit: number) {
+    this.poolReads += 1;
+    if (this.failPoolRead) throw new Error('pool read down');
+    return [...this.pool.values()].filter((item) => item.subtopicId === subtopicId && item.level === level && item.promptVersion === promptVersion).slice(0, limit);
+  }
+  async poolSave(items: PooledQuestion[]) {
+    if (this.failPoolWrite) throw new Error('pool write down');
+    let saved = 0;
+    for (const item of items) {
+      if (this.pool.has(item.id)) continue;
+      this.pool.set(item.id, { ...item });
+      saved += 1;
+    }
+    this.poolWrites += saved;
+    return saved;
+  }
+  async poolMarkUsed(ids: string[]) {
+    for (const id of ids) {
+      this.usedLog.push(id);
+      const item = this.pool.get(id);
+      if (item) item.uses += 1;
+    }
+  }
+
   async recentQuestionTexts() {
     return this.recent;
   }

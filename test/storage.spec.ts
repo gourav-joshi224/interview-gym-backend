@@ -81,3 +81,63 @@ test('summaries mark only unfinished, current-engine sessions as resumable', asy
   assert.deepEqual(summaries.map((item) => [item.sessionId, item.resumable, item.answeredCount]), [['a', true, 2], ['b', false, 0], ['c', false, 0]]);
   assert.equal(summaries[2].level, 'advanced');
 });
+
+// ---- question pool
+
+test('poolSave stores each question under its content id and ignores ones that already exist', async () => {
+  const created: string[] = [];
+  class Pool extends StorageService {
+    protected override get db() {
+      return {
+        collection: (name: string) => ({
+          doc: (id: string) => ({
+            create: async () => {
+              if (id === 'dup') throw Object.assign(new Error('exists'), { code: 6 });
+              if (id === 'boom') throw Object.assign(new Error('permission'), { code: 7 });
+              created.push(`${name}/${id}`);
+            },
+          }),
+        }),
+      } as never;
+    }
+  }
+  const item = (id: string) => ({ id, topicId: 't', subtopicId: 's', level: 'beginner' as const, type: 'concept' as const, concept: 'c', question: 'q', expectedPoints: [], commonMistakes: [], promptVersion: 1, uses: 0 });
+  const storage = new Pool();
+
+  assert.equal(await storage.poolSave([item('a'), item('dup'), item('b')]), 2);
+  assert.deepEqual(created, ['questionPool/a', 'questionPool/b']);
+  await assert.rejects(storage.poolSave([item('boom')]), /permission/);
+});
+
+test('poolCandidates filters on subtopic, level and prompt version only', async () => {
+  const filters: Array<[string, string, unknown]> = [];
+  let limited = 0;
+  class Pool extends StorageService {
+    protected override get db() {
+      const query: Record<string, unknown> = {};
+      query.where = (field: string, op: string, value: unknown) => (filters.push([field, op, value]), query);
+      query.limit = (n: number) => ((limited = n), query);
+      query.get = async () => ({ docs: [{ id: 'x1', data: () => ({ subtopicId: 's', question: 'Q?', uses: 4 }) }] });
+      return { collection: () => query } as never;
+    }
+  }
+  const items = await new Pool().poolCandidates('scope-closures', 'beginner', 3, 60);
+
+  assert.deepEqual(filters, [['subtopicId', '==', 'scope-closures'], ['level', '==', 'beginner'], ['promptVersion', '==', 3]]);
+  assert.equal(limited, 60);
+  assert.equal(items[0].id, 'x1');
+  assert.equal(items[0].uses, 4);
+});
+
+test('poolMarkUsed increments the counter without touching content', async () => {
+  const updates: Array<[string, Record<string, unknown>]> = [];
+  class Pool extends StorageService {
+    protected override get db() {
+      return { collection: () => ({ doc: (id: string) => ({ update: async (data: Record<string, unknown>) => void updates.push([id, data]) }) }) } as never;
+    }
+  }
+  await new Pool().poolMarkUsed(['a', 'b']);
+  assert.deepEqual(updates.map(([id]) => id), ['a', 'b']);
+  assert.ok(isServerTimestamp(updates[0][1].lastUsedAt));
+  assert.deepEqual(Object.keys(updates[0][1]).sort(), ['lastUsedAt', 'uses']);
+});

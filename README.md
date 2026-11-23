@@ -17,6 +17,29 @@ NestJS API for the Interview Gym app. It writes interview questions with Gemini,
 
 All routes except `/curriculum` and `/health` require a Firebase ID token (`Authorization: Bearer ...`). The user id always comes from the verified token. Other users' sessions return 404.
 
+## Keeping Gemini usage low
+
+Questions that pass code checks **and** the reviewer are stored in a shared Firestore collection, `questionPool`, keyed by subtopic, level and `QUESTION_PROMPT_VERSION`. When a session starts, each slot is filled from the pool when at least `QUESTION_POOL_MIN_TO_REUSE` questions the user has not seen exist for that subtopic and level. Only the remaining slots are sent to Gemini, so a fully covered session makes no generation call at all (grading still makes one).
+
+Rules that keep this safe:
+- A pooled question is re-validated with the current rules before it is served.
+- A user never receives a question that matches one from their recent sessions.
+- "Retry weak areas" questions are never read from or written to the pool, because they contain text the user typed.
+- `QUESTION_POOL_FRESH_RATE` of questions are generated fresh even when the pool could serve them, so the pool keeps growing.
+- Pool reads and writes are best effort. A pool outage means normal generation, never a failed session.
+- Bump `QUESTION_PROMPT_VERSION` in `question-prompts.ts` after a prompt or anchor change that makes old questions worse. Old entries are then ignored.
+
+Pre-fill the pool once so most sessions reuse reviewed questions from day one. Always start with a dry run, since a full fill is hundreds of Gemini calls:
+
+```bash
+npm run build
+npm run seed:pool -- --dry-run --target 6
+npm run seed:pool -- --topic javascript --level beginner --target 6
+npm run seed:pool -- --topic javascript --subtopic scope-closures --level beginner --target 4
+```
+
+The tool skips combinations that already have enough questions, so it is safe to stop and re-run.
+
 Levels are `beginner`, `intermediate`, `advanced`. Their wording lives in `src/domain/levels.ts` and is what the prompts and the reviewer use. Topics and subtopics live in `src/modules/curriculum/curriculum.data.ts`.
 
 ## Run
