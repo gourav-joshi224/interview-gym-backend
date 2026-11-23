@@ -40,6 +40,9 @@ export interface SessionSummary {
   status: string;
   overallScore: number | null;
   readiness: string | null;
+  /** An unfinished session created by the current engine, so it can be continued. */
+  resumable: boolean;
+  answeredCount: number;
   createdAt: string | null;
 }
 
@@ -55,35 +58,35 @@ const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 @Injectable()
 export class StorageService {
-  private get db() {
+  /** Overridable so tests can supply an in-memory Firestore. */
+  protected get db() {
     return getAdminFirestore();
   }
 
   async createSession(input: NewSession): Promise<string> {
     const sessionId = randomUUID();
+    // Only plain data goes through clean(). A JSON round-trip would turn the server-timestamp
+    // placeholder into an empty object and silently store {} as the creation time.
+    const data = clean({
+      userId: input.userId,
+      mode: input.mode,
+      topic: input.topic,
+      topicId: input.topicId,
+      topicIds: input.topicIds,
+      level: input.level,
+      totalQuestions: input.totalQuestions,
+      questionPlan: input.questionPlan,
+      focus: input.focus,
+      answers: [],
+      status: 'in_progress',
+      report: null,
+      questionResults: null,
+      sessionVersion: SESSION_VERSION,
+    });
     await this.db
       .collection(SESSIONS)
       .doc(sessionId)
-      .create(
-        clean({
-          userId: input.userId,
-          mode: input.mode,
-          topic: input.topic,
-          topicId: input.topicId,
-          topicIds: input.topicIds,
-          level: input.level,
-          totalQuestions: input.totalQuestions,
-          questionPlan: input.questionPlan,
-          focus: input.focus,
-          answers: [],
-          status: 'in_progress',
-          report: null,
-          questionResults: null,
-          sessionVersion: SESSION_VERSION,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        }),
-      );
+      .create({ ...data, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     return sessionId;
   }
 
@@ -119,7 +122,7 @@ export class StorageService {
       .where('userId', '==', userId)
       .orderBy('createdAt', 'desc')
       .limit(limit)
-      .select('mode', 'topic', 'topicId', 'level', 'difficulty', 'totalQuestions', 'status', 'report', 'createdAt')
+      .select('mode', 'topic', 'topicId', 'level', 'difficulty', 'totalQuestions', 'status', 'report', 'createdAt', 'sessionVersion', 'answers')
       .get();
 
     return snapshot.docs.map((doc) => {
@@ -136,6 +139,8 @@ export class StorageService {
         status: data.status === 'completed' ? 'completed' : 'in_progress',
         overallScore: typeof report?.overallScore === 'number' ? report.overallScore : null,
         readiness: report?.readiness ?? null,
+        resumable: data.status !== 'completed' && Number(data.sessionVersion ?? 1) >= SESSION_VERSION,
+        answeredCount: Array.isArray(data.answers) ? data.answers.length : 0,
         createdAt: toIso(data.createdAt),
       };
     });

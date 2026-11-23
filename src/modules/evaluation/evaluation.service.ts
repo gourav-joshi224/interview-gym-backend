@@ -12,7 +12,7 @@ import {
 import { findTopic } from '../curriculum/curriculum.data';
 import { AiUnavailableError, GeminiService } from '../llm/gemini.service';
 import { assessAttempt } from './attempt-gate';
-import { resourcesForTopics } from './resources';
+import { ScoredSubtopic, resourcesForTopic, selectResources } from './resources';
 import { overallScore, readinessFor, scoreQuestion, skillBreakdown } from './scoring';
 
 interface RawPoint {
@@ -151,10 +151,25 @@ export class EvaluationService {
         clip(summary?.improvementPlan, 1200) ||
         `Review the fundamentals of ${topic?.label ?? 'the topics in this interview'} and retry at ${LEVEL_LABEL[level]} level.`,
       skillBreakdown: breakdown,
-      learningResources: resourcesForTopics(input.topicIds),
+      learningResources: this.studyLinks(questionResults, input.topicIds),
     };
 
     return { report, questionResults };
+  }
+
+  /** Study links come from the subtopics the candidate was weakest on, not from the topic name. */
+  private studyLinks(results: QuestionResult[], topicIds: string[]) {
+    const groups = new Map<string, ScoredSubtopic & { total: number; count: number }>();
+    for (const result of results) {
+      const key = `${result.topicId}/${result.subtopicId}`;
+      const group = groups.get(key) ?? { topicId: result.topicId, subtopicId: result.subtopicId, subtopic: result.subtopic, score: 0, total: 0, count: 0 };
+      group.total += result.score;
+      group.count += 1;
+      group.score = group.total / group.count;
+      groups.set(key, group);
+    }
+    const links = selectResources([...groups.values()]);
+    return links.length > 0 ? links : topicIds.flatMap((id) => resourcesForTopic(id)).slice(0, 4);
   }
 
   private async grade(
@@ -199,7 +214,7 @@ export class EvaluationService {
       'Grade only technical content. A point is "covered" only if the answer states it correctly, in any wording, with evidence you can point to. "partial" means the idea is present but incomplete, vague or only half correct. "missed" means absent or wrong.',
       'Do not reward keyword lists or name-dropping without explanation. Do not penalise good answers for style, brevity, or for ignoring points that the question did not ask for.',
       'List a statement under misconceptions only when it is clearly technically wrong.',
-      'Write feedback directly to the candidate, specific to what they wrote. The idealAnswer must be correct, concise, and consistent with the expected points.',
+      'Write feedback directly to the candidate, specific to what they wrote. Put code identifiers, functions, commands and expressions in single backticks, and no other markdown. The idealAnswer must be correct, concise, and consistent with the expected points.',
     ].join(' ');
   }
 
@@ -252,6 +267,7 @@ ${blocks.join('\n\n')}`.trim();
     return {
       questionId: item.questionId,
       topicId: item.topicId,
+      subtopicId: item.subtopicId,
       score,
       concept: item.concept,
       subtopic: item.subtopic,
@@ -272,6 +288,7 @@ ${blocks.join('\n\n')}`.trim();
     return {
       questionId: item.questionId,
       topicId: item.topicId,
+      subtopicId: item.subtopicId,
       score: 0,
       concept: item.concept,
       subtopic: item.subtopic,

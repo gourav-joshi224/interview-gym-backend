@@ -99,3 +99,32 @@ test('leaves a correctly formatted snippet alone', () => {
   assert.ok(result.ok);
   if (result.ok) assert.equal(result.question.question.match(/```/g)?.length, 2);
 });
+
+import { sanitizeMarkup } from '../src/modules/questions/question-validator';
+
+test('keeps well-formed inline code and key terms', () => {
+  const text = 'A **counter** function declares `let count = 0` and returns an inner function.';
+  assert.equal(sanitizeMarkup(text), text);
+});
+
+test('removes unbalanced markers instead of leaking them to the screen', () => {
+  assert.equal(sanitizeMarkup('Unbalanced `tick and **bold here'), 'Unbalanced tick and bold here');
+});
+
+test('strips headings, links and empty markers that the UI does not render', () => {
+  assert.equal(sanitizeMarkup('## Title [docs](http://x.io) and ``empty`` and ****'), 'Title docs and empty and ');
+});
+
+test('does not touch fenced code blocks', () => {
+  const text = 'Why?\n```js\nconst a = `x`;\n```';
+  assert.equal(sanitizeMarkup(text), text);
+});
+
+test('a bold term inside code collapses to plain code', () => {
+  assert.equal(sanitizeMarkup('Nested `**x**` inside'), 'Nested `x` inside');
+});
+
+test('marker characters do not count against the word limit', () => {
+  const marked = rawQuestion({ question: `What does **${'closure '.repeat(1)}** do with \`count\` when the outer function returns and why is it useful here?` });
+  assert.equal(validateCandidate(marked, slot, ctx()).ok, true);
+});

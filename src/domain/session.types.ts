@@ -37,6 +37,7 @@ export interface PointResult {
 export interface QuestionResult {
   questionId: string;
   topicId: string;
+  subtopicId: string;
   score: number;
   concept: string;
   subtopic: string;
@@ -61,6 +62,8 @@ export interface SkillScore {
 export interface LearningResource {
   title: string;
   url: string;
+  /** The weak subtopic this link was chosen for. */
+  reason?: string;
 }
 
 export interface InterviewFinalReport {

@@ -1,6 +1,7 @@
 import { Level, LEVEL_LABEL, LEVEL_SPEC } from '../../domain/levels';
 import { QuestionType, TopicDef } from '../curriculum/curriculum.data';
 import { QUESTION_TYPES } from './question-validator';
+import { pickAnchors } from '../curriculum/anchors';
 import { Slot } from './slot-planner';
 
 const TYPE_GUIDE: Record<QuestionType, string> = {
@@ -74,6 +75,7 @@ export function buildGenerationPrompt(input: {
     'Write only what the schema asks for. Never include the answer in the question text.',
   ].join(' ');
 
+  const usedAnchors = new Set<string>();
   const slotLines = slots
     .map((slot) => {
       const parts = [
@@ -83,7 +85,10 @@ export function buildGenerationPrompt(input: {
         `type="${slot.type}"`,
       ];
       if (slot.focus) parts.push(`target this weak concept: "${sanitizeInline(slot.focus)}"`);
-      return `- ${parts.join(' | ')}`;
+      const anchors = pickAnchors(slot.subtopicId, level, 2, Math.random, usedAnchors);
+      anchors.forEach((anchor) => usedAnchors.add(anchor));
+      const line = `- ${parts.join(' | ')}`;
+      return anchors.length > 0 ? `${line}\n    real interview angles to build on (choose one, rephrase it, vary the scenario): ${anchors.join('; ')}` : line;
     })
     .join('\n');
 
@@ -117,7 +122,9 @@ RULES FOR EACH QUESTION
 - Put code only inside fenced blocks, and only when the topic is code-oriented and the type is coding or debugging. Write the fence on its own lines, with one statement per line and real line breaks inside the block.
 - Depth follows the level, not the subtopic's reputation. If a subtopic is usually advanced (for example the event loop or garbage collection) and the level is beginner or intermediate, ask only about its most basic, widely known idea.
 - Vary the situation and wording across questions. Avoid reusing the same company, product or numbers.
-- expectedPoints: 3 to 5 concrete, checkable points a good answer contains, each under 25 words. Weight 3 = essential, 2 = expected, 1 = nice to mention. They must be correct and specific to this question.
+- Ground each question in a real interview angle when one is given for its slot. Interviewers keep asking these, so the candidate should recognise the territory, but use a fresh scenario and wording.
+- Formatting: wrap every code identifier, variable, function, method, operator, command, header, status code and SQL expression in single backticks, for example \`count\`, \`Promise.all\`, \`GET /users\`, \`SELECT ... FOR UPDATE\`. Wrap one to three key technical terms the question is about in double asterisks, for example **closure** or **cache stampede**. Never put an answer or hint in the marked text. Do not use any other markdown (no headings, lists, links or bold elsewhere).
+- expectedPoints: 3 to 5 concrete, checkable points a good answer contains, each under 25 words. Weight 3 = essential, 2 = expected, 1 = nice to mention. They must be correct and specific to this question. Use single backticks around code identifiers in points too.
 - commonMistakes: 0 to 3 typical wrong beliefs or errors candidates make on this question.
 ${avoidBlock}`.trim();
 

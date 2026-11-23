@@ -44,6 +44,8 @@ test('computes the score in code from point verdicts, not from a model-supplied 
   assert.deepEqual(output.questionResults[1].missedCheckpoints, ['Point B about memory retention']);
   assert.ok(output.report.learningResources.length > 0);
   assert.ok(output.report.learningResources.every((resource) => resource.url.startsWith('https://')));
+  // Both questions are on closures and scored well, so links point at closures with the subtopic as the reason.
+  assert.ok(output.report.learningResources.some((resource) => resource.url.includes('closure')));
 });
 
 test('"covered" with no evidence is downgraded to partial', async () => {
@@ -116,4 +118,18 @@ test('a hallucinated verdict value is treated as missed', async () => {
   const gemini = new FakeGemini([() => ({ results: [odd, result(1, ['covered', 'covered'])], summary })]);
   const output = await make(gemini).evaluate({ topicIds: ['javascript'], level: 'beginner', plan, answers: answersFor(GOOD, GOOD) });
   assert.equal(output.questionResults[0].score, 25);
+});
+
+test('study links follow the weakest subtopics of the session', async () => {
+  const mixed = [
+    planItem(0, { topicId: 'nodejs', subtopicId: 'streams-buffers', subtopic: 'Streams & buffers' }),
+    planItem(1, { topicId: 'javascript', subtopicId: 'scope-closures', subtopic: 'Scope & closures' }),
+  ];
+  const answers = mixed.map((item) => ({ questionId: item.questionId, question: item.renderedQuestion, answer: GOOD }));
+  const gemini = new FakeGemini([() => ({ results: [result(0, ['missed', 'missed']), result(1, ['covered', 'covered'])], summary })]);
+  const output = await make(gemini).evaluate({ topicIds: ['nodejs', 'javascript'], level: 'beginner', plan: mixed, answers });
+
+  const urls = output.report.learningResources.map((resource) => resource.url);
+  assert.ok(urls.every((url) => url.includes('nodejs.org')), urls.join(', '));
+  assert.equal(output.questionResults[0].subtopicId, 'streams-buffers');
 });

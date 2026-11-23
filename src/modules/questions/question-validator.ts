@@ -62,6 +62,25 @@ export function normalizeCodeFences(text: string): string {
   });
 }
 
+/**
+ * Keeps inline markup (`code` and **term**) only when it is well formed. A stray marker would otherwise show up
+ * on screen as literal characters or swallow the rest of the sentence, so unbalanced markers are removed.
+ * Fenced code blocks are left untouched.
+ */
+export function sanitizeMarkup(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/g)
+    .map((segment) => {
+      if (segment.startsWith('```')) return segment;
+      let prose = segment.replace(/^#{1,6}\s+/gm, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+      if ((prose.match(/`/g) ?? []).length % 2 === 1) prose = prose.replace(/`/g, '');
+      if ((prose.match(/\*\*/g) ?? []).length % 2 === 1) prose = prose.replace(/\*\*/g, '');
+      // Empty markers and a term nested inside code (`**x**`) carry no meaning.
+      return prose.replace(/``/g, '').replace(/\*\*\s*\*\*/g, '').replace(/`([^`]*)`/g, (_m, inner: string) => `\`${inner.replace(/\*\*/g, '')}\``);
+    })
+    .join('');
+}
+
 export function stripCode(text: string): string {
   return text.replace(/```[\s\S]*?```/g, ' ');
 }
@@ -116,7 +135,7 @@ export function validateCandidate(
 ): { ok: true; question: CleanQuestion } | { ok: false; reasons: string[] } {
   const reasons: string[] = [];
 
-  const question = normalizeCodeFences(asString(raw.question)).trim();
+  const question = sanitizeMarkup(normalizeCodeFences(asString(raw.question))).trim();
   const subtopicId = asString(raw.subtopicId);
   const type = asString(raw.type) as QuestionType;
   const level = asString(raw.level);
@@ -136,7 +155,8 @@ export function validateCandidate(
   if (expectedPoints.length < 2 || expectedPoints.length > 7) reasons.push('bad-expected-points');
 
   if (question) {
-    const prose = stripCode(question);
+    // Markers are not words, and a bold term must not count towards the sentence limits twice.
+    const prose = stripCode(question).replace(/\*\*/g, '').replace(/`/g, '');
     const words = countWords(prose);
     if (words > MAX_PROSE_WORDS) reasons.push('too-wordy');
     if (words < MIN_PROSE_WORDS) reasons.push('too-short');

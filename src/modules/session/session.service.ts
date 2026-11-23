@@ -75,6 +75,8 @@ export class SessionService {
       questionNumber: 1,
       question: questionPlan[0].renderedQuestion,
       questionId: questionPlan[0].questionId,
+      subtopic: questionPlan[0].subtopic,
+      type: questionPlan[0].type,
     };
   }
 
@@ -238,7 +240,7 @@ export class SessionService {
       done: !next,
       totalQuestions: session.totalQuestions,
       questionNumber: Math.min(answeredCount + 1, session.totalQuestions),
-      ...(next ? { question: next.renderedQuestion, questionId: next.questionId } : {}),
+      ...(next ? { question: next.renderedQuestion, questionId: next.questionId, subtopic: next.subtopic, type: next.type } : {}),
     };
   }
 
