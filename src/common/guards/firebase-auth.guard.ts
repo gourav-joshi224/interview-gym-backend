@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { getFirebaseAdmin } from '../firebase-admin';
+import { getAdminAuth } from '../firebase-admin';
 
 type AuthenticatedRequest = {
   headers: Record<string, string | string[] | undefined>;
@@ -31,8 +31,7 @@ export class FirebaseAuthGuard implements CanActivate {
     }
 
     try {
-      const admin = getFirebaseAdmin();
-      const decoded = await admin.auth().verifyIdToken(token);
+      const decoded = await getAdminAuth().verifyIdToken(token);
       request.user = { uid: decoded.uid };
       return true;
     } catch {

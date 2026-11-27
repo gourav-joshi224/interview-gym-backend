@@ -1,247 +1,61 @@
-# Interview Brain Backend
+# Interview Gym backend
 
-NestJS backend for an AI-powered interview practice app. It generates topic-aware interview questions, evaluates answers, manages multi-question interview sessions, stores results in Firebase/Firestore, and exposes a dashboard-friendly history API.
+NestJS API for the Interview Gym app. It writes interview questions with Gemini, runs the session, grades answers, and stores results in Firestore.
 
-## What This Backend Does
+## How a session works
 
-- Generates interview questions for supported backend-focused topics.
-- Uses an internal question assembly pipeline before falling back to the configured LLM provider.
-- Evaluates single answers and returns structured feedback.
-- Runs full interview sessions with question plans, progress tracking, and final reports.
-- Stores interview results and session data in Firestore.
-- Exposes recent interview history for a dashboard UI.
-- Ships with Swagger docs, validation, logging, API-key protection, and basic in-memory rate limiting.
+1. `GET /curriculum` lists topics, subtopics and levels (public).
+2. `POST /session/start` takes `{ topic, level, subtopics?, focus?, totalQuestions }`.
+   - The server plans one **slot** per question (subtopic and question type) in code, so coverage and mix never depend on the model.
+   - Gemini writes one question per slot, with 3 to 5 checkable *expected points*.
+   - Each question passes code checks (level rules, subtopic, length, duplicates against what the user already saw). A cheaper reviewer model then checks topic, level fit and clarity in one batched call. Rejected slots are regenerated once.
+   - The plan is stored with the session. Fewer questions than requested are returned rather than padded with bad ones; the response carries the real `totalQuestions`.
+3. `POST /session/progress` with `{ sessionId, questionId, answer }` saves one answer and returns the next question, or `done: true`.
+4. `POST /session/finish` with `{ sessionId }` grades all answers in one Gemini call. Per-point verdicts (`covered`, `partial`, `missed`) come from the model; **scores are computed in code** from those verdicts. Empty, "I don't know" and noise answers score 0 without a model call. A finished session returns its stored report instead of being graded again.
+5. `GET /session/:id` returns where the user is, so the client can resume after a refresh.
+6. `GET /dashboard/my-sessions` lists the signed-in user's sessions.
 
-## Main Capabilities
+All routes except `/curriculum` and `/health` require a Firebase ID token (`Authorization: Bearer ...`). The user id always comes from the verified token. Other users' sessions return 404.
 
-### 1. Question Generation
+## Keeping Gemini usage low
 
-`POST /interview/question`
+Questions that pass code checks **and** the reviewer are stored in a shared Firestore collection, `questionPool`, keyed by subtopic, level and `QUESTION_PROMPT_VERSION`. When a session starts, each slot is filled from the pool when at least `QUESTION_POOL_MIN_TO_REUSE` questions the user has not seen exist for that subtopic and level. Only the remaining slots are sent to Gemini, so a fully covered session makes no generation call at all (grading still makes one).
 
-The backend first tries to build questions from its internal topic packs and rendering pipeline. If a topic cannot be assembled there, it can fall back to the configured OpenAI-compatible provider.
+Rules that keep this safe:
+- A pooled question is re-validated with the current rules before it is served.
+- A user never receives a question that matches one from their recent sessions.
+- "Retry weak areas" questions are never read from or written to the pool, because they contain text the user typed.
+- `QUESTION_POOL_FRESH_RATE` of questions are generated fresh even when the pool could serve them, so the pool keeps growing.
+- Pool reads and writes are best effort. A pool outage means normal generation, never a failed session.
+- Bump `QUESTION_PROMPT_VERSION` in `question-prompts.ts` after a prompt or anchor change that makes old questions worse. Old entries are then ignored.
 
-Supported built-in topics:
-
-- `javascript`
-- `node.js` / `nodejs`
-- `system design`
-- `caching`
-- `databases`
-- `queues`
-- `apis`
-- `concurrency`
-
-### 2. Answer Evaluation
-
-`POST /interview/evaluate`
-
-Evaluates a candidate answer and returns:
-
-- numeric score
-- strengths
-- missing concepts
-- user-friendly explanation
-- ideal answer
-- follow-up question
-- skill breakdown
-- learning resources
-
-Single-answer evaluations are also persisted to Firestore.
-
-### 3. Interview Sessions
-
-Session APIs let the frontend run a guided interview flow:
-
-- `POST /session/start` creates a question plan and returns the first question
-- `POST /session/progress` saves answers and returns the next question
-- `POST /session/finish` evaluates the full session and returns a final report
-
-The session pipeline stores question metadata so evaluation stays aligned with the exact generated question and rubric.
-
-### 4. Dashboard History
-
-`GET /dashboard/interviews?limit=20`
-
-Returns recent interview records for dashboard views. The limit is clamped to `1-50`.
-
-## Architecture Overview
-
-### Core Modules
-
-- `src/modules/interview`
-  Handles single-question generation and answer evaluation.
-- `src/modules/session`
-  Manages start/progress/finish interview session flows.
-- `src/modules/interview-brain`
-  Contains the internal question packs, planning rules, rendering, validation, evaluation, and aggregation logic.
-- `src/modules/ai`
-  Wraps the OpenAI-compatible client used for fallback generation and evaluation.
-- `src/modules/storage`
-  Persists interview records and interview sessions to Firestore via the REST API.
-- `src/modules/dashboard`
-  Returns recent interview history for the frontend.
-- `src/modules/cache`
-  Placeholder cache layer for question generation hooks.
-
-### Request Safeguards
-
-- Global request validation with NestJS `ValidationPipe`
-- Global exception filter and logging interceptor
-- In-memory IP rate limiting: `60` requests per minute
-- Optional `x-api-key` protection through `INTERNAL_API_KEY`
-  If `INTERNAL_API_KEY` is not set, requests are allowed in dev mode.
-
-## API Docs
-
-Swagger UI is available at:
-
-```text
-http://localhost:3001/api-docs
-```
-
-The app accepts both normal and `/api`-prefixed controller routes for frontend compatibility.
-
-Examples:
-
-- `POST /interview/question` and `POST /api/interview/question`
-- `POST /session/start` and `POST /api/session/start`
-
-## Local Development
-
-### Prerequisites
-
-- Node.js
-- npm
-- Firebase project credentials for Firestore storage
-- An OpenAI-compatible API key if you want live model responses
-
-### Install and Run
+Pre-fill the pool once so most sessions reuse reviewed questions from day one. Always start with a dry run, since a full fill is hundreds of Gemini calls:
 
 ```bash
-cp .env.example .env
+npm run build
+npm run seed:pool -- --dry-run --target 6
+npm run seed:pool -- --topic javascript --level beginner --target 6
+npm run seed:pool -- --topic javascript --subtopic scope-closures --level beginner --target 4
+```
+
+The tool skips combinations that already have enough questions, so it is safe to stop and re-run.
+
+Levels are `beginner`, `intermediate`, `advanced`. Their wording lives in `src/domain/levels.ts` and is what the prompts and the reviewer use. Topics and subtopics live in `src/modules/curriculum/curriculum.data.ts`.
+
+## Run
+
+```bash
+cp .env.example .env   # fill in GEMINI_API_KEY and the Firebase service account
 npm install
-npm run start:dev
-```
-
-By default the app runs on:
-
-```text
-http://0.0.0.0:3001
-```
-
-Common local frontend origin:
-
-```text
-http://localhost:3000 or http://localhost:6969
-```
-
-## Environment Variables
-
-The project validates environment configuration on boot.
-
-### Required for normal app startup
-
-```env
-PORT=3001
-HOST=0.0.0.0
-CORS_ORIGIN=http://localhost:3000,http://localhost:6969
-XAI_MODEL=your_AI_model
-FIREBASE_API_KEY=your_firebase_web_api_key
-FIREBASE_PROJECT_ID=your_firebase_project_id
-FIREBASE_CLIENT_EMAIL=your_service_account_email
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
-
-### Optional but recommended
-
-```env
-XAI_API_KEY=your_provider_api_key
-XAI_BASE_URL=https://api.groq.com/openai/v1
-INTERNAL_API_KEY=your_internal_frontend_api_key
-DEBUG_QUESTION_PIPELINE=false
-INTERVIEW_DEBUG=false
-MAX_PER_ARCHETYPE=3
-QUESTION_WORD_LIMIT=45
-```
-
-Notes:
-
-- `XAI_API_KEY` is optional, but without it live LLM generation/evaluation falls back to local-safe responses.
-- `CORS_ORIGIN` is required in production and supports a comma-separated allowlist.
-- `FIREBASE_PRIVATE_KEY` must include the full PEM value.
-- `.env.example` is currently minimal; the full runtime set is defined in [`src/config/env.config.ts`](/home/unthinkable-lap/Videos/backend/src/config/env.config.ts).
-
-## Endpoints
-
-### Interview
-
-- `POST /interview/question`
-- `POST /interview/evaluate`
-
-### Session
-
-- `POST /session/start`
-- `POST /session/progress`
-- `POST /session/finish`
-
-### Dashboard
-
-- `GET /dashboard/interviews?limit=20`
-
-Equivalent `/api/...` routes are also available.
-
-## Typical Flow
-
-### Single Question Flow
-
-1. Frontend requests a question with topic, experience, and difficulty.
-2. Backend assembles a question from topic packs when possible.
-3. User submits an answer.
-4. Backend evaluates it and stores the interview result.
-
-### Session Flow
-
-1. Frontend calls `/session/start`.
-2. Backend creates a session and a full question plan.
-3. Frontend sends cumulative answers to `/session/progress`.
-4. Backend returns the next question in sequence.
-5. Frontend calls `/session/finish`.
-6. Backend computes question-level results and a final interview report.
-
-## Testing
-
-Run tests with:
-
-```bash
+npm run start:dev      # http://localhost:3001, Swagger at /api-docs (not in production)
 npm test
+npm run build && npm start
 ```
 
-Current tests cover areas such as:
+## Firestore
 
-- session finish scoring behavior
-- non-attempt and weak-attempt handling
-- question assembly diversity and uniqueness
-- JavaScript question rendering and metadata-driven evaluation
+Collection `interviewSessions` needs a composite index on `userId` (ascending) and `createdAt` (descending). Access goes through the Admin SDK, so Firestore security rules can deny all client access.
 
-## Project Structure
+## Not covered by tests
 
-```text
-src/
-  common/                 guards, filters, interceptors
-  config/                 environment validation and config loading
-  modules/
-    ai/                   provider client + fallback behavior
-    cache/                cache hooks
-    dashboard/            recent interview history endpoints
-    interview/            single question/evaluation endpoints
-    interview-brain/      topic packs, planning, rendering, scoring
-    session/              multi-step interview session flow
-    storage/              Firestore persistence
-test/                     integration-style and pipeline tests
-```
-
-## Notes
-
-- Firestore storage is used through the REST API rather than the Firebase Admin SDK.
-- Session evaluation is largely driven by the internal `interview-brain` logic, not only by raw LLM output.
-- If the model provider fails, the backend is designed to return schema-safe fallback responses instead of crashing.
+Calls to the live Gemini API and live Firestore are faked in tests. Run one real session after configuring keys before relying on it.
